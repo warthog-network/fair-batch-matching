@@ -113,9 +113,14 @@ public:
 
     auto operator<=>(const Price_uint64&) const = default;
 
+    // `basePrec` is the base token's decimal count. We scale by 10^(WART-basePrec)
+    // so that the stored mantissa+exponent, when later read via
+    // `to_double_adjusted(basePrec)`, round-trips back to the original
+    // user-entered value. Without this scaling, prices like "5" would be
+    // stored as ~0.00005 and displayed as ~0.00005.
     static std::optional<Price_uint64> from_double_adjusted(double d, TokenDecimals basePrec, bool ceil = false)
     {
-        return from_double(d * std::pow(10.0, 8 - int(basePrec.value())), ceil);
+        return from_double(d * std::pow(10.0, int(TokenDecimals::WART.value()) - int(basePrec.value())), ceil);
     }
 
     static std::optional<Price_uint64> from_double(double d, bool ceil = false)
@@ -141,10 +146,10 @@ public:
         return try_parse<double>(s)
             .and_then([&](double d) { return from_double(d, ceil); });
     }
-    static std::optional<Price_uint64> from_string_adjusted(std::string_view s, TokenDecimals prec, bool ceil = false)
+    static std::optional<Price_uint64> from_string_adjusted(std::string_view s, TokenDecimals basePrec, bool ceil = false)
     {
         return try_parse<double>(s)
-            .and_then([&](double d) { return from_double_adjusted(d, prec, ceil); });
+            .and_then([&](double d) { return from_double_adjusted(d, basePrec, ceil); });
     }
 
 private:

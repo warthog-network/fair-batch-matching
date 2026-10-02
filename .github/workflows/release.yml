@@ -64,7 +64,9 @@ jobs:
 
       - name: Verify Embind symbols present
         run: |
-          for fn in addBuy addSell editPool deleteOrder setFee clearAndSetBaseDecimals; do
+          # FbmEngine class + 10 methods (7 mutators/match + 3 getters) and the
+          # factory class binding.
+          for fn in FbmEngine reset setPoolBase setPoolQuote setFee addBuy addSell deleteOrder getConfig getPoolBase getPoolQuote match; do
             strings build-wasm/fbm.wasm | grep -qx "$fn" \
               || { echo "missing Embind binding: $fn"; exit 1; }
           done
@@ -85,6 +87,10 @@ jobs:
       - name: Build the npm package (wasm + TS + assets)
         working-directory: pkg
         run: npm run build
+
+      - name: Run TS tests
+        working-directory: pkg
+        run: npm test
 
       - name: Verify npm package layout
         run: |

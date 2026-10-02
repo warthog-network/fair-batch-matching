@@ -3,259 +3,381 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width" />
-        <title>Demo</title>
+        <title>FBM Demo</title>
+        <style>
+            .invalid { border-color: red; background: #fff5f5; }
+            .error-note { color: red; font-size: 0.85em; margin: 0 0 0.5em 0; min-height: 1em; }
+            .match-ready { color: #080; font-weight: bold; }
+            .match-not-ready { color: #888; }
+            table { border-collapse: collapse; margin-bottom: 1em; }
+            th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: right; }
+            th:first-child, td:first-child { text-align: left; }
+            input[type="text"], input[type="number"] { padding: 4px; min-width: 6em; }
+            section { margin-bottom: 1.5em; }
+            h2 { margin-bottom: 0.5em; }
+            #matchOutput { background: #f4f4f4; padding: 0.5em; font-family: monospace; font-size: 0.85em; max-height: 20em; overflow: auto; }
+        </style>
     </head>
-
-    <script charset="utf-8">
-        var Module = {
-          onRuntimeInitialized: () => {
-              console.log("runtime initialized")
-          }
-        }
-    </script>
-    <script type="module">
-        import initModule from "./fbm.js";
-          initModule(Module);
-    </script>
-    <script charset="utf-8">
-        function insertRow(obj,rowarr){
-            var row = obj.insertRow(-1);
-            for (var i=0; i<rowarr.length; ++i){
-                row.insertCell(i).innerText = rowarr[i];
-            }
-        }
-        function insertOrderbookEntry(obj,base,rowarr){
-            var row = obj.insertRow(-1);
-            var firstCell = row.insertCell(0);
-            var btn = document.createElement('button');
-            const rowIndex = row.rowIndex;
-            btn.innerHTML = rowIndex;
-            btn.onclick = function(){
-                deleteOrder(base,rowIndex - 1);
-            };
-            firstCell.appendChild(btn);
-            for (var i=0; i<rowarr.length; ++i){
-                row.insertCell(i + 1).innerText = rowarr[i];
-            }
-        }
-        function price(base,quote){
-            if (base != 0){
-                return quote/base;
-            }
-            return "N/A";
-        }
-        function annotate_parse_errors({poolToken, poolWart}){
-            document.getElementById("beforeToken").style.backgroundColor = (poolToken? 'red' : 'white');
-            document.getElementById("beforeWart").style.backgroundColor = (poolWart? 'red' : 'white');
-            return !poolToken && !poolWart; // true if both don't have parse errors
-        }
-        function updateData(res){
-            if (res["error"] != null){
-                alert("Error" + res["error"]);
-                return;
-            }
-            if (!annotate_parse_errors(res.parseErrors))
-                return; // cannot evaluate if there are parse errors
-            const match = res.match;
-            var buys = match.buys
-            var tbodyBuy = document.getElementById("tbodyBuy")
-            tbodyBuy.innerHTML=""
-            for (var i=0, len = buys.length; i<len; i++){
-                insertOrderbookEntry(tbodyBuy, false, [buys[i]["amount"],buys[i]["filled"],buys[i]["limit"]]);
-            }
-            var sells = match.sells
-            var tbodySell = document.getElementById("tbodySell")
-            tbodySell.innerHTML=""
-            for (var i=0, len = sells.length; i<len; i++){
-                insertOrderbookEntry(tbodySell,true, [sells[i]["amount"],sells[i]["filled"],sells[i]["limit"]]);
-            }
-            var tbodyPool = document.getElementById("tbodyPool")
-            document.getElementById("beforePrice").innerHTML = match.poolBefore.price;
-            document.getElementById("afterToken").innerHTML = match.poolAfter.base;
-            document.getElementById("afterWart").innerHTML = match.poolAfter.quote;
-            document.getElementById("afterPrice").innerHTML = match.poolAfter.price;
-
-            const toPool = match.toPool;
-            const filled = match.filled;
-
-            var tbodyBuyers = document.getElementById("tbodyBuyers")
-            tbodyBuyers.innerHTML=""
-            insertRow(tbodyBuyers,["orders",match.matched.quote, match.matched.base, match.matched.price]);
-            if (toPool && toPool.isQuote){
-                insertRow(tbodyBuyers,["via pool",toPool.quote, toPool.base, toPool.price]);
-            }
-            insertRow(tbodyBuyers,["total",filled.outQuoteBuyer, filled.inBaseBuyer, match.filled.priceBuyer]);
-
-            var tbodySellers = document.getElementById("tbodySellers")
-            tbodySellers.innerHTML=""
-            insertRow(tbodySellers,["orders", match.matched.base, match.matched.quote, match.matched.price]);
-            if (toPool && !toPool.isQuote){
-                insertRow(tbodySellers,["via pool", toPool.base, toPool.quote, toPool.price]);
-            }
-            insertRow(tbodySellers,["total",filled.outBaseSeller, filled.inQuoteSeller, filled.priceSeller]);
-        }
-        function addSell() {
-            editPool();
-            var res = Module.addSell({
-               price: document.getElementById("sellPrice").value,
-               amount: document.getElementById("tokenAmount").value
-            });
-            console.log(res);
-            updateData(res);
-        }
-        function addBuy() {
-            editPool();
-            var res = Module.addBuy({
-               price: document.getElementById("buyPrice").value,
-               amount: document.getElementById("wartAmount").value
-            });
-            console.log(res);
-            updateData(res);
-        }
-        function editPool(){
-            var res = Module.editPool({
-               token: document.getElementById("beforeToken").value,
-               wart: document.getElementById("beforeWart").value
-            });
-            console.log(res);
-            updateData(res);
-        }
-        function deleteOrder(base, index){
-            var res = Module.deleteOrder({
-               base: base,
-               index: index
-            });
-            console.log(res);
-            updateData(res);
-        }
-        function applyFee() {
-            var res = Module.setFee({
-                E4: parseInt(document.getElementById("feeE4").value, 10) || 0
-            });
-            updateData(res);
-        }
-        function applyDecimals() {
-            if (!confirm("Change base decimals? This clears the orderbook and pool.")) return;
-            var res = Module.clearAndSetBaseDecimals({
-                baseDecimals: parseInt(document.getElementById("baseDecimals").value, 10) || 0
-            });
-            updateData(res);
-            editPool();
-        }
-    </script>
-
     <body>
-        <div>
+        <h1>Fair Batch Matching (FBM) Demo</h1>
 
-            <div>
-                <h2>Order Book:</h2>
-                Sell:
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>AMOUNT</th>
-                            <th>FILLED</th>
-                            <th>LIMIT</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodySell">
-                    </tbody>
-                </table>
-                <label for="sellPrice">Limit price (TOKEN/WART):</label>
-                <input type="text" id="sellPrice" name="sellPrice" value="1.0"><br><br>
-                <label for="tokenAmount">Amount (TOKEN):</label>
-                <input type="text" id="tokenAmount" name="tokenAmount"><br><br>
-                <button onclick="addSell()">Limit Swap TOKEN to WART (Sell x TOKEN for WART)</button>
-            </div>
-            <div>
-                Buy:
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>AMOUNT</th>
-                            <th>FILLED</th>
-                            <th>LIMIT</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodyBuy">
-                    </tbody>
-                </table>
-                <label for="buyPrice">Limit price (TOKEN/WART):</label>
-                <input type="text" id="buyPrice" name="buyPrice" value="1.0"><br><br>
-                <label for="wartAmount">Amount (WART):</label>
-                <input type="text" id="wartAmount" name="wartAmount"><br><br>
-                <button onclick="addBuy()">Limit Swap WART to TOKEN (Buy TOKEN with x WART)</button>
-            </div>
-            <div>
-                <h2>Pool:</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>TOKEN</th>
-                            <th>WART</th>
-                            <th>PRICE</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodyPool">
-                        <tr>
-                            <td>before</td>
-                            <td><input id="beforeToken" value="100" oninput="editPool()"></td>
-                            <td><input id="beforeWart" value="200" oninput="editPool()"></td>
-                            <td id="beforePrice">N/A</td>
-                        </tr>
-                        <tr>
-                            <td>after</td>
-                            <td id="afterToken">N/A</td>
-                            <td id="afterWart">N/A</td>
-                            <td id="afterPrice">N/A</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div>
-                <h2>Buyer Swaps:</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>FROM (WART)</th>
-                            <th>TO (TOKEN)</th>
-                            <th>PRICE</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodyBuyers">
-                    </tbody>
-                </table>
-            </div>
-            <div>
-                <h2>Seller Swaps:</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>FROM (TOKEN)</th>
-                            <th>TO (WART)</th>
-                            <th>PRICE</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tbodySellers">
-                    </tbody>
-                </table>
-            </div>
-            <div>
-                <h2>Settings:</h2>
-                <label for="feeE4">Fee (in 0.0001 units, e.g. 5 = 0.05%):</label>
-                <input type="number" id="feeE4" name="feeE4" value="5" min="0" max="9999">
-                <button onclick="applyFee()">Set Fee</button>
-                <br><br>
-                <label for="baseDecimals">Base token decimals (1-254):</label>
-                <input type="number" id="baseDecimals" name="baseDecimals" value="3" min="1" max="254">
-                <button onclick="applyDecimals()">Apply Decimals (clears book)</button>
-                <br><br>
-            </div>
-        </div>
+        <section>
+            <h2>Pool Reserves</h2>
+            <label>Base (TOKEN): <input id="poolBase" type="text" placeholder="e.g. 100"></label>
+            <p class="error-note" id="poolBaseError"></p>
+            <label>Quote (WART): <input id="poolQuote" type="text" placeholder="e.g. 200"></label>
+            <p class="error-note" id="poolQuoteError"></p>
+        </section>
+
+        <section>
+            <h2>Settings</h2>
+            <label>Fee (E4, 0–9999): <input id="feeE4" type="number" value="5" min="0" max="9999"></label>
+            <p class="error-note" id="feeE4Error"></p>
+            <button id="resetButton">Reset (clears book + pool)</button>
+        </section>
+
+        <section>
+            <h2>Add Buy (spend WART to buy TOKEN)</h2>
+            <label>Price: <input id="buyPrice" type="text" value="1.0"></label>
+            <p class="error-note" id="buyPriceError"></p>
+            <label>Amount (WART): <input id="buyAmount" type="text"></label>
+            <p class="error-note" id="buyAmountError"></p>
+            <button id="addBuyButton" disabled>Add buy</button>
+            <p class="error-note" id="buyError"></p>
+        </section>
+
+        <section>
+            <h2>Add Sell (sell TOKEN for WART)</h2>
+            <label>Price: <input id="sellPrice" type="text" value="1.0"></label>
+            <p class="error-note" id="sellPriceError"></p>
+            <label>Amount (TOKEN): <input id="sellAmount" type="text"></label>
+            <p class="error-note" id="sellAmountError"></p>
+            <button id="addSellButton" disabled>Add sell</button>
+            <p class="error-note" id="sellError"></p>
+        </section>
+
+        <section>
+            <h2>Order Book</h2>
+            <h3>Sells</h3>
+            <table>
+                <thead><tr><th>×</th><th>AMOUNT</th><th>FILLED</th><th>LIMIT</th></tr></thead>
+                <tbody id="tbodySell"></tbody>
+            </table>
+            <h3>Buys</h3>
+            <table>
+                <thead><tr><th>×</th><th>AMOUNT</th><th>FILLED</th><th>LIMIT</th></tr></thead>
+                <tbody id="tbodyBuy"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Match</h2>
+            <p id="matchReadiness" class="match-not-ready">Waiting for valid pool reserves…</p>
+            <div id="matchOutput"></div>
+        </section>
+
+        <script type="module">
+            import init from "./fbm.js";
+
+            // ─── Init ────────────────────────────────────────────────────────
+            // `fbm.js` is the raw Embind loader. It exports a default factory
+            // function; once awaited, the result is the Module object whose
+            // `FbmEngine` member is the engine class constructor.
+            //
+            // (If you are using the npm wrapper instead, the equivalent is
+            // `import FbmEngine from "warthog-fbm"; await FbmEngine.init();`
+            // — same shape, no manual Module step.)
+            let engine = null;
+            try {
+                const Module = await init();
+                engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 5 });
+            } catch (err) {
+                document.body.innerHTML = `<pre>Failed to load FBM engine: ${err.message}</pre>`;
+                throw err;
+            }
+
+            // ─── JS-side state model ─────────────────────────────────────────
+            // The engine is permissive — it always accepts values and always
+            // returns a match. The demo owns field validity on the JS side
+            // and gates `engine.match()` on it.
+            const state = {
+                poolBase:        { valid: false, error: "" },
+                poolQuote:       { valid: false, error: "" },
+                feeE4:           { valid: true,  error: "" },
+                buyPrice:        { valid: false, error: "" },
+                buyAmount:       { valid: false, error: "" },
+                sellPrice:       { valid: false, error: "" },
+                sellAmount:      { valid: false, error: "" },
+                lastMatch: null,
+            };
+
+            // ─── DOM refs ─────────────────────────────────────────────────────
+            const $ = (id) => document.getElementById(id);
+            const poolBaseEl      = $("poolBase");
+            const poolQuoteEl     = $("poolQuote");
+            const poolBaseError   = $("poolBaseError");
+            const poolQuoteError  = $("poolQuoteError");
+            const feeE4El         = $("feeE4");
+            const feeE4Error      = $("feeE4Error");
+            const buyPriceEl      = $("buyPrice");
+            const buyAmountEl     = $("buyAmount");
+            const buyPriceError   = $("buyPriceError");
+            const buyAmountError  = $("buyAmountError");
+            const buyError        = $("buyError");
+            const sellPriceEl     = $("sellPrice");
+            const sellAmountEl    = $("sellAmount");
+            const sellPriceError  = $("sellPriceError");
+            const sellAmountError = $("sellAmountError");
+            const sellError       = $("sellError");
+            const tbodySell       = $("tbodySell");
+            const tbodyBuy        = $("tbodyBuy");
+            const matchReadiness  = $("matchReadiness");
+            const matchOutput     = $("matchOutput");
+            const addBuyButton    = $("addBuyButton");
+            const addSellButton   = $("addSellButton");
+
+            // ─── Renderers ────────────────────────────────────────────────────
+            function renderField(input, errEl, f) {
+                input.classList.toggle("invalid", !f.valid);
+                input.title = f.error || "";
+                errEl.textContent = f.error || "";
+            }
+
+            function renderOrders() {
+                tbodyBuy.innerHTML = "";
+                tbodySell.innerHTML = "";
+                // Empty pool is valid — show rows regardless. Each row
+                // reflects what the engine actually has, including FILLED
+                // values from the latest match.
+                if (!state.lastMatch) return;
+                state.lastMatch.buys.forEach((row, i) => {
+                    const tr = document.createElement("tr");
+                    const btn = document.createElement("button");
+                    btn.textContent = "×";
+                    btn.dataset.buyIndex = String(i);
+                    tr.insertCell().appendChild(btn);
+                    tr.insertCell().textContent = row.amount;
+                    tr.insertCell().textContent = row.filled;
+                    tr.insertCell().textContent = String(row.limit);
+                    tbodyBuy.appendChild(tr);
+                });
+                state.lastMatch.sells.forEach((row, i) => {
+                    const tr = document.createElement("tr");
+                    const btn = document.createElement("button");
+                    btn.textContent = "×";
+                    btn.dataset.sellIndex = String(i);
+                    tr.insertCell().appendChild(btn);
+                    tr.insertCell().textContent = row.amount;
+                    tr.insertCell().textContent = row.filled;
+                    tr.insertCell().textContent = String(row.limit);
+                    tbodySell.appendChild(tr);
+                });
+            }
+
+            function renderMatchReadiness() {
+                const ready = state.poolBase.valid && state.poolQuote.valid;
+                matchReadiness.className = ready ? "match-ready" : "match-not-ready";
+                matchReadiness.textContent = ready
+                    ? "Live match (re-runs on every change)"
+                    : "Waiting for valid pool reserves…";
+            }
+
+            function renderMatch() {
+                matchOutput.textContent = state.lastMatch
+                    ? JSON.stringify(state.lastMatch, null, 2)
+                    : "";
+            }
+
+            // ─── Single source of match() calls ─────────────────────────────
+            // `tryMatch()` is the *only* place that calls `engine.match()`.
+            // It early-returns (clearing lastMatch) if the pool is invalid.
+            function tryMatch() {
+                if (state.poolBase.valid && state.poolQuote.valid) {
+                    state.lastMatch = engine.match();
+                } else {
+                    state.lastMatch = null;
+                }
+                renderMatchReadiness();
+                renderMatch();
+                renderOrders();
+            }
+
+            // ─── Button gating ────────────────────────────────────────────────
+            function updateBuyButton() {
+                const ready = state.poolBase.valid && state.poolQuote.valid
+                    && state.buyPrice.valid && state.buyAmount.valid;
+                addBuyButton.disabled = !ready;
+            }
+            function updateSellButton() {
+                const ready = state.poolBase.valid && state.poolQuote.valid
+                    && state.sellPrice.valid && state.sellAmount.valid;
+                addSellButton.disabled = !ready;
+            }
+
+            // ─── Input handlers ───────────────────────────────────────────────
+            poolBaseEl.addEventListener("input", () => {
+                const res = engine.setPoolBase({ value: poolBaseEl.value });
+                state.poolBase.valid = "ok" in res;
+                state.poolBase.error = "error" in res ? res.error : "";
+                renderField(poolBaseEl, poolBaseError, state.poolBase);
+                tryMatch();
+                updateBuyButton();
+                updateSellButton();
+            });
+            poolQuoteEl.addEventListener("input", () => {
+                const res = engine.setPoolQuote({ value: poolQuoteEl.value });
+                state.poolQuote.valid = "ok" in res;
+                state.poolQuote.error = "error" in res ? res.error : "";
+                renderField(poolQuoteEl, poolQuoteError, state.poolQuote);
+                tryMatch();
+                updateBuyButton();
+                updateSellButton();
+            });
+            feeE4El.addEventListener("input", () => {
+                const n = Number(feeE4El.value);
+                if (!Number.isFinite(n) || !Number.isInteger(n)) {
+                    state.feeE4.valid = false;
+                    state.feeE4.error = "must be an integer";
+                } else {
+                    const res = engine.setFee({ E4: n });
+                    state.feeE4.valid = "ok" in res;
+                    state.feeE4.error = "error" in res ? res.error : "";
+                }
+                renderField(feeE4El, feeE4Error, state.feeE4);
+                tryMatch();
+            });
+
+            buyPriceEl.addEventListener("input", () => {
+                const res = engine.validatePrice({ price: buyPriceEl.value });
+                state.buyPrice.valid = "ok" in res;
+                state.buyPrice.error = "error" in res ? res.error : "";
+                renderField(buyPriceEl, buyPriceError, state.buyPrice);
+                updateBuyButton();
+            });
+            buyAmountEl.addEventListener("input", () => {
+                const res = engine.validateBaseAmount({ amount: buyAmountEl.value });
+                state.buyAmount.valid = "ok" in res;
+                state.buyAmount.error = "error" in res ? res.error : "";
+                renderField(buyAmountEl, buyAmountError, state.buyAmount);
+                updateBuyButton();
+            });
+            sellPriceEl.addEventListener("input", () => {
+                const res = engine.validatePrice({ price: sellPriceEl.value });
+                state.sellPrice.valid = "ok" in res;
+                state.sellPrice.error = "error" in res ? res.error : "";
+                renderField(sellPriceEl, sellPriceError, state.sellPrice);
+                updateSellButton();
+            });
+            sellAmountEl.addEventListener("input", () => {
+                const res = engine.validateQuoteAmount({ amount: sellAmountEl.value });
+                state.sellAmount.valid = "ok" in res;
+                state.sellAmount.error = "error" in res ? res.error : "";
+                renderField(sellAmountEl, sellAmountError, state.sellAmount);
+                updateSellButton();
+            });
+
+            addBuyButton.addEventListener("click", () => {
+                const res = engine.addBuy({
+                    price: buyPriceEl.value,
+                    amount: buyAmountEl.value,
+                });
+                if ("ok" in res) {
+                    buyPriceEl.value = "";
+                    buyAmountEl.value = "";
+                    state.buyPrice = { valid: false, error: "" };
+                    state.buyAmount = { valid: false, error: "" };
+                    renderField(buyPriceEl, buyPriceError, state.buyPrice);
+                    renderField(buyAmountEl, buyAmountError, state.buyAmount);
+                    buyError.textContent = "";
+                    updateBuyButton();
+                    tryMatch();
+                } else {
+                    buyError.textContent = res.error;
+                }
+            });
+            addSellButton.addEventListener("click", () => {
+                const res = engine.addSell({
+                    price: sellPriceEl.value,
+                    amount: sellAmountEl.value,
+                });
+                if ("ok" in res) {
+                    sellPriceEl.value = "";
+                    sellAmountEl.value = "";
+                    state.sellPrice = { valid: false, error: "" };
+                    state.sellAmount = { valid: false, error: "" };
+                    renderField(sellPriceEl, sellPriceError, state.sellPrice);
+                    renderField(sellAmountEl, sellAmountError, state.sellAmount);
+                    sellError.textContent = "";
+                    updateSellButton();
+                    tryMatch();
+                } else {
+                    sellError.textContent = res.error;
+                }
+            });
+
+            // Delete order — buy orders are on the quote side, sell orders on
+            // the base side. The index is into the engine's book (DESC for
+            // buys, ASC for sells), so we use the dataset value directly.
+            tbodyBuy.addEventListener("click", (e) => {
+                const btn = e.target.closest("button[data-buy-index]");
+                if (!btn) return;
+                const idx = Number(btn.dataset.buyIndex);
+                const res = engine.deleteOrder({ base: false, index: idx });
+                if ("ok" in res) {
+                    tryMatch();
+                } else {
+                    buyError.textContent = res.error;
+                }
+            });
+            tbodySell.addEventListener("click", (e) => {
+                const btn = e.target.closest("button[data-sell-index]");
+                if (!btn) return;
+                const idx = Number(btn.dataset.sellIndex);
+                const res = engine.deleteOrder({ base: true, index: idx });
+                if ("ok" in res) {
+                    tryMatch();
+                } else {
+                    sellError.textContent = res.error;
+                }
+            });
+
+            $("resetButton").addEventListener("click", () => {
+                engine.reset();
+                state.poolBase    = { valid: false, error: "" };
+                state.poolQuote   = { valid: false, error: "" };
+                state.feeE4       = { valid: true,  error: "" };
+                state.buyPrice    = { valid: false, error: "" };
+                state.buyAmount   = { valid: false, error: "" };
+                state.sellPrice   = { valid: false, error: "" };
+                state.sellAmount  = { valid: false, error: "" };
+                poolBaseEl.value = "";
+                poolQuoteEl.value = "";
+                feeE4El.value = "5";
+                buyPriceEl.value = "1.0";
+                buyAmountEl.value = "";
+                sellPriceEl.value = "1.0";
+                sellAmountEl.value = "";
+                buyError.textContent = "";
+                sellError.textContent = "";
+                buyPriceError.textContent = "";
+                buyAmountError.textContent = "";
+                sellPriceError.textContent = "";
+                sellAmountError.textContent = "";
+                renderField(poolBaseEl, poolBaseError, state.poolBase);
+                renderField(poolQuoteEl, poolQuoteError, state.poolQuote);
+                renderField(feeE4El, feeE4Error, state.feeE4);
+                renderField(buyPriceEl, buyPriceError, state.buyPrice);
+                renderField(buyAmountEl, buyAmountError, state.buyAmount);
+                renderField(sellPriceEl, sellPriceError, state.sellPrice);
+                renderField(sellAmountEl, sellAmountError, state.sellAmount);
+                updateBuyButton();
+                updateSellButton();
+                tryMatch();
+            });
+
+            // ─── Initial render ───────────────────────────────────────────────
+            renderMatchReadiness();
+            renderMatch();
+        </script>
     </body>
 </html>

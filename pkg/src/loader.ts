@@ -5,26 +5,35 @@
 import initRaw from "../fbm.js";
 import type { MainModule } from "../index.raw";
 
-export interface FbmLoaderOptions {
+export interface InitOptions {
     /** Override wasm URL resolution. Default keeps the wasm next to fbm.js. */
     locateFile?: (path: string, scriptDirectory: string) => string;
 }
 
-function withDefaultArg<T>(fn: (arg: T) => unknown): (arg?: T) => unknown {
-    return (arg?: T) => fn(arg ?? ({} as T));
+let cachedModule: MainModule | undefined;
+
+/*
+ * `FbmEngine` is callable both as `await FbmEngine.init()` (static) and
+ * as `new FbmEngine(config)` (instance factory). JavaScript's `new`
+ * operator on a function uses the explicit return value when it's an
+ * object, so we return the wasm-bound FbmEngine instance here.
+ */
+function FbmEngineLoader(this: void, config?: object): unknown {
+    if (!cachedModule) {
+        throw new Error(
+            "FbmEngine.init() must be awaited before constructing instances",
+        );
+    }
+    return new (cachedModule.FbmEngine as new (cfg?: object) => unknown)(
+        config ?? {},
+    );
 }
 
-export default async function init(options: FbmLoaderOptions = {}): Promise<MainModule> {
+FbmEngineLoader.init = async (options?: InitOptions): Promise<void> => {
+    if (cachedModule) return;
     const locateFile =
-        options.locateFile ?? ((path: string, prefix: string) => `${prefix}${path}`);
-    const module = await initRaw({ locateFile } as never);
+        options?.locateFile ?? ((path: string, prefix: string) => `${prefix}${path}`);
+    cachedModule = await initRaw({ locateFile } as never);
+};
 
-    // Embind's generated JS wrapper checks argument count strictly. The typed
-    // surface allows `clearAndSetBaseDecimals()` with no argument; the
-    // runtime wrapper here fills in an empty object when the caller omits it.
-    const rawClear = module.clearAndSetBaseDecimals as (arg: unknown) => unknown;
-    (module as unknown as { clearAndSetBaseDecimals: typeof rawClear }).clearAndSetBaseDecimals =
-        withDefaultArg(rawClear);
-
-    return module;
-}
+export default FbmEngineLoader;

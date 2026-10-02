@@ -23,7 +23,7 @@ if get_option('emscripten')
     macro_prefix_map = ['-fmacro-prefix-map=' + em_root + '=/emsdk']
   endif
 
-  exe = executable('fbm', ['src/wasm_callbacks.cpp',src],
+  exe = executable('fbm', ['src/fbm_bindings.cpp',src],
     dependencies: json_dep,
     cpp_args:['-fexceptions', '-g0',
               '-msse', '-msimd128', '-pthread',

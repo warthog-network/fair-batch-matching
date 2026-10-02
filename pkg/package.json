@@ -24,10 +24,13 @@
     "stage": "cp -f ../build-wasm/fbm.js ../build-wasm/fbm.wasm .",
     "publish:assets": "cp -f fbm.js fbm.wasm index.d.ts index.raw.d.ts dist/",
     "build": "npm run build:wasm && npm run stage && npm run build:ts && npm run publish:assets",
+    "test": "node --import tsx --test --test-reporter spec tests/*.test.ts",
     "clean": "rm -rf dist ../build-wasm"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "rimraf": "^6.0.0",
+    "tsx": "^4",
     "typescript": "^5"
   }
 }
