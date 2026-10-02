@@ -99,53 +99,7 @@ jobs:
       - name: Publish to npm
         if: ${{ !inputs.skip_publish }}
         working-directory: pkg
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo "=== Pre-publish diagnostic ==="
-          echo "=== Tooling ==="
-          echo "node: $(node --version 2>&1)"
-          echo "npm:  $(npm --version 2>&1)"
-          echo "registry: $(npm config get registry 2>&1)"
-          echo
-          echo "=== Auth env var ==="
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "NODE_AUTH_TOKEN is unset or EMPTY (this is the most likely ENEEDAUTH cause)"
-          else
-            echo "NODE_AUTH_TOKEN is set (length=${#NODE_AUTH_TOKEN})"
-            case "${NODE_AUTH_TOKEN}" in
-              npm_*) echo "  format: starts with npm_ (correct)" ;;
-              *)    echo "  format: does NOT start with npm_ (likely whitespace / wrong value)" ;;
-            esac
-          fi
-          echo
-          echo "=== npm auth probes ==="
-          echo "npm whoami (default registry):"
-          npm whoami 2>&1 || true
-          echo "npm whoami (explicit registry):"
-          npm whoami --registry=https://registry.npmjs.org/ 2>&1 || true
-          echo
-          echo "=== Publish dry-run (prints the same auth error Publish would) ==="
-          npm publish --dry-run --access public --registry=https://registry.npmjs.org/ 2>&1 | head -40 || true
-          echo
-          echo "=== .npmrc override check ==="
-          echo "(if any .npmrc contains _authToken/_auth/etc., npm uses it and ignores NODE_AUTH_TOKEN)"
-          for path in "$HOME/.npmrc" "/root/.npmrc" "/etc/npmrc" "$GITHUB_WORKSPACE/.npmrc" "$GITHUB_WORKSPACE/pkg/.npmrc"; do
-            if [ -f "$path" ]; then
-              echo "FOUND: $path"
-              echo "----- contents (tokens masked) -----"
-              sed -E 's/(token|_auth|authToken|username|_password)\s*=.*/<masked>/I' "$path"
-              echo "----- end -----"
-            else
-              echo "absent: $path"
-            fi
-          done
-          echo
-          echo "=== Effective npm config (filtered to auth-related) ==="
-          npm config list 2>&1 | grep -iE "_authToken|registry|//" || echo "(no auth-related entries)"
-          echo
-          echo "=== Running npm publish ==="
-          npm publish --access public --provenance
+        run: npm publish --access public --provenance
 
       - name: Zip demo bundle
         run: (cd out && zip -r ../fbm-demo.zip .)
