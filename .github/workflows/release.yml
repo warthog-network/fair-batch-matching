@@ -96,12 +96,13 @@ jobs:
         working-directory: pkg
         run: npm pack
 
-      - name: Diagnose npm auth
-        if: failure()
+      - name: Publish to npm
+        if: ${{ !inputs.skip_publish }}
         working-directory: pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          echo "=== Pre-publish diagnostic ==="
           echo "=== Tooling ==="
           echo "node: $(node --version 2>&1)"
           echo "npm:  $(npm --version 2>&1)"
@@ -142,13 +143,9 @@ jobs:
           echo
           echo "=== Effective npm config (filtered to auth-related) ==="
           npm config list 2>&1 | grep -iE "_authToken|registry|//" || echo "(no auth-related entries)"
-
-      - name: Publish to npm
-        if: ${{ !inputs.skip_publish }}
-        working-directory: pkg
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          echo
+          echo "=== Running npm publish ==="
+          npm publish --access public --provenance
 
       - name: Zip demo bundle
         run: (cd out && zip -r ../fbm-demo.zip .)
