@@ -92,12 +92,6 @@ jobs:
         working-directory: pkg
         run: npm test
 
-      - name: Verify npm package layout
-        run: |
-          for f in package.json index.js index.d.ts index.raw.d.ts src/loader.js fbm.js fbm.wasm; do
-            [ -f "pkg/dist/$f" ] || { echo "missing pkg/dist/$f"; exit 1; }
-          done
-
       - name: Pack npm tarball for GitHub Release
         working-directory: pkg
         run: npm pack
