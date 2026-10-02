@@ -97,6 +97,7 @@ jobs:
         run: npm pack
 
       - name: Diagnose npm auth
+        if: failure()
         working-directory: pkg
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -125,6 +126,22 @@ jobs:
           echo
           echo "=== Publish dry-run (prints the same auth error Publish would) ==="
           npm publish --dry-run --access public --registry=https://registry.npmjs.org/ 2>&1 | head -40 || true
+          echo
+          echo "=== .npmrc override check ==="
+          echo "(if any .npmrc contains _authToken/_auth/etc., npm uses it and ignores NODE_AUTH_TOKEN)"
+          for path in "$HOME/.npmrc" "/root/.npmrc" "/etc/npmrc" "$GITHUB_WORKSPACE/.npmrc" "$GITHUB_WORKSPACE/pkg/.npmrc"; do
+            if [ -f "$path" ]; then
+              echo "FOUND: $path"
+              echo "----- contents (tokens masked) -----"
+              sed -E 's/(token|_auth|authToken|username|_password)\s*=.*/<masked>/I' "$path"
+              echo "----- end -----"
+            else
+              echo "absent: $path"
+            fi
+          done
+          echo
+          echo "=== Effective npm config (filtered to auth-related) ==="
+          npm config list 2>&1 | grep -iE "_authToken|registry|//" || echo "(no auth-related entries)"
 
       - name: Publish to npm
         if: ${{ !inputs.skip_publish }}
