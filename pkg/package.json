@@ -1,6 +1,6 @@
 {
   "name": "warthog-fbm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Warthog Fair Batch Matching (FBM) engine — C++/WebAssembly, strict-typed via a two-file Embind architecture.",
   "license": "MIT",
   "type": "module",
