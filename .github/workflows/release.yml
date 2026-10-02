@@ -96,6 +96,36 @@ jobs:
         working-directory: pkg
         run: npm pack
 
+      - name: Diagnose npm auth
+        working-directory: pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "=== Tooling ==="
+          echo "node: $(node --version 2>&1)"
+          echo "npm:  $(npm --version 2>&1)"
+          echo "registry: $(npm config get registry 2>&1)"
+          echo
+          echo "=== Auth env var ==="
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NODE_AUTH_TOKEN is unset or EMPTY (this is the most likely ENEEDAUTH cause)"
+          else
+            echo "NODE_AUTH_TOKEN is set (length=${#NODE_AUTH_TOKEN})"
+            case "${NODE_AUTH_TOKEN}" in
+              npm_*) echo "  format: starts with npm_ (correct)" ;;
+              *)    echo "  format: does NOT start with npm_ (likely whitespace / wrong value)" ;;
+            esac
+          fi
+          echo
+          echo "=== npm auth probes ==="
+          echo "npm whoami (default registry):"
+          npm whoami 2>&1 || true
+          echo "npm whoami (explicit registry):"
+          npm whoami --registry=https://registry.npmjs.org/ 2>&1 || true
+          echo
+          echo "=== Publish dry-run (prints the same auth error Publish would) ==="
+          npm publish --dry-run --access public --registry=https://registry.npmjs.org/ 2>&1 | head -40 || true
+
       - name: Publish to npm
         if: ${{ !inputs.skip_publish }}
         working-directory: pkg
