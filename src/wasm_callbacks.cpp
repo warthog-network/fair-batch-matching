@@ -33,15 +33,17 @@ static emval make_error(const char* msg)
     return obj;
 }
 
+static emval make_error(std::string msg)
+{
+    emval obj = emval::object();
+    obj.set("error", emval(std::move(msg)));
+    return obj;
+}
+
 emval match_result()
 {
-    emval errors = emval::object();
-    errors.set("poolToken", emval(!poolToken.has_value()));
-    errors.set("poolWart", emval(!poolWart.has_value()));
     if (!poolToken || !poolWart) {
-        emval out = emval::object();
-        out.set("parseErrors", errors);
-        return out;
+        return emval::null();
     }
 
     const defi::PoolLiquidity_uint64 p { *poolToken, *poolWart };
@@ -152,7 +154,6 @@ emval match_result()
     matchObj.set("poolAfter", pool_val(pTmp));
 
     emval out = emval::object();
-    out.set("parseErrors", errors);
     out.set("match", matchObj);
     return out;
 }
@@ -192,23 +193,45 @@ defi::Order_uint64 parse_order(emval v, TokenDecimals decimals)
 
 emval edit_pool(emval v)
 {
+    bool tokenOk = true;
+    bool wartOk = true;
     try {
-        poolToken = Funds_uint64::parse(get_string_or_empty(v, "token"), baseDecimals);
+        auto opt = Funds_uint64::parse(get_string_or_empty(v, "token"), baseDecimals);
+        if (opt)
+            poolToken = opt;
+        else {
+            poolToken.reset();
+            tokenOk = false;
+        }
     } catch (...) {
         poolToken.reset();
+        tokenOk = false;
     }
     try {
-        poolWart = Wart::try_parse(get_string_or_empty(v, "wart")).value_or_null();
+        Result<Wart> result = Wart::try_parse(get_string_or_empty(v, "wart"));
+        if (result.has_value())
+            poolWart = result.value();
+        else {
+            poolWart.reset();
+            wartOk = false;
+        }
     } catch (...) {
         poolWart.reset();
+        wartOk = false;
     }
+    if (!tokenOk && !wartOk)
+        return make_error("Cannot parse token or wart");
+    if (!tokenOk)
+        return make_error("Cannot parse token");
+    if (!wartOk)
+        return make_error("Cannot parse wart");
     return match_result();
 }
 
 emval delete_order(emval v)
 {
     if (v["base"].isUndefined() || v["index"].isUndefined())
-        return match_result();
+        return make_error("Missing 'base' or 'index'");
     try {
         bool base = v["base"].as<bool>();
         auto i = v["index"].as<size_t>();
@@ -217,6 +240,7 @@ emval delete_order(emval v)
         else
             bso.delete_quote(i);
     } catch (...) {
+        return make_error("'index' must be a non-negative integer");
     }
     return match_result();
 }
@@ -250,47 +274,85 @@ emval add_sell(emval v)
 emval set_fee(emval v)
 {
     if (v["E4"].isUndefined())
-        return make_error("Can't extract integer at 'E4' key.");
+        return make_error("Missing 'E4' field");
+    int e4 = 0;
     try {
-        int e4 { v["E4"].as<int>() };
-        if (e4 >= 10000) {
-            throw std::runtime_error("Fee value must be denoted as multiple of 0.0001 i.e. as integer in 0...9999.");
-        }
-        feeE4 = e4;
-    } catch (std::runtime_error& e) {
-        return make_error(e.what());
+        e4 = v["E4"].as<int>();
     } catch (...) {
-        return make_error("Can't extract integer at 'E4' key.");
+        return make_error("'E4' must be an integer in 0..9999, got " + std::to_string(e4));
     }
-    return match_result();
+    if (e4 >= 0 && e4 < 10000) {
+        feeE4 = e4;
+        return match_result();
+    }
+    return make_error("'E4' must be an integer in 0..9999");
 }
 
 emval clear_and_set_base_decimals(emval v)
 {
-    bool updated { true };
-    if (v.hasOwnProperty("baseDecimals") && !v["baseDecimals"].isUndefined()) {
-        updated = false;
-        try {
-            int d { v["baseDecimals"].as<int>() };
-            if (d > 0 && d < 255) {
-                Result<TokenDecimals> td { TokenDecimals::from_number(d) };
-                if (td.has_value()) {
-                    baseDecimals = td.value();
-                    updated = true;
-                }
-            }
-        } catch (...) {
-        };
-        if (!updated)
-            return make_error("Cannot extract decimals at key 'baseDecimals'");
-    }
     poolToken.reset();
     poolWart.reset();
     bso.clear();
+
+    std::optional<int> baseDecimalsOpt;
+    if (v.call<bool>("hasOwnProperty", std::string("baseDecimals"))
+        && !v["baseDecimals"].isUndefined()
+        && !v["baseDecimals"].isNull()) {
+        emval field { v["baseDecimals"] };
+        // Branch on JS type to dodge the strict toWireType<int>() / std::string
+        // JS exceptions raised during val::as<Type>(). These can't be caught by
+        // C++ try/catch, so we coerce via methods that succeed for any input.
+        if (field.isNumber()) {
+            double n = field.as<double>();
+            long rounded = static_cast<long>(n);
+            if (n != n || n < 0 || n > 18 || static_cast<double>(rounded) != n)
+                return make_error(
+                    "'baseDecimals' must be an integer in 0..18, got "
+                    + std::to_string(rounded));
+            baseDecimalsOpt = static_cast<int>(rounded);
+        } else if (field.isString()) {
+            std::string raw = field.as<std::string>();
+            try {
+                size_t pos = 0;
+                long parsed = std::stol(raw, &pos);
+                if (pos != raw.size() || parsed < 0 || parsed > 18)
+                    return make_error(
+                        "'baseDecimals' must be an integer in 0..18, got \""
+                        + raw + "\"");
+                baseDecimalsOpt = static_cast<int>(parsed);
+            } catch (...) {
+                return make_error(
+                    "'baseDecimals' must be an integer in 0..18, got \""
+                    + raw + "\"");
+            }
+        } else {
+            // Anything else (boolean, object, ...) is a type error.
+            return make_error(
+                "'baseDecimals' must be an integer in 0..18, got non-numeric value");
+        }
+    }
+
+    if (baseDecimalsOpt) {
+        const int d = *baseDecimalsOpt;
+        auto success = false;
+        // The 0..18 range is enforced by TokenDecimals::from_number (max = 18).
+        // We also reject negative values explicitly to avoid wraparound on the
+        // uint8_t cast inside the constructor.
+        if (d >= 0 && d <= 18) {
+            Result<TokenDecimals> td { TokenDecimals::from_number(static_cast<uint8_t>(d)) };
+            if (td.has_value()) {
+                baseDecimals = td.value();
+                success = true;
+            }
+        }
+        if (!success)
+            return make_error("'baseDecimals' must be an integer in 0..18, got " + std::to_string(d));
+    }
     return match_result();
 }
 
-EMSCRIPTEN_BINDINGS(demo) {
+EMSCRIPTEN_BINDINGS(demo)
+{
     emscripten::function("addBuy", &add_buy);
     emscripten::function("addSell", &add_sell);
     emscripten::function("editPool", &edit_pool);

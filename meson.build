@@ -34,7 +34,8 @@ if get_option('emscripten')
     link_args: ['-sMODULARIZE', '-sEXPORT_ES6',
       '-sNO_DISABLE_EXCEPTION_CATCHING',
       '-sINITIAL_MEMORY=67108864', '-mwasm64',
-      '-lembind'
+      '-lembind',
+      '--emit-tsd', meson.project_source_root() / 'pkg' / 'index.raw.d.ts',
       ],
     install: false
   )

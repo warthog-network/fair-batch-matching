@@ -1,4 +1,4 @@
-name: Release WASM
+name: Release WASM + npm
 on:
   push:
     tags:
@@ -9,13 +9,19 @@ on:
         description: 'Release tag (e.g. v0.1.0). Leave blank for master-<short-sha>.'
         required: false
         type: string
+      skip_publish:
+        description: 'Skip the npm publish step (still builds everything).'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
-    name: Build & publish WASM release
+    name: Build & publish WASM + npm release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,6 +35,10 @@ jobs:
       - name: Install Meson
         run: python3 -m pip install --break-system-packages meson
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Resolve release tag
         id: tag
         run: |
@@ -40,6 +50,12 @@ jobs:
             NAME="master-${GITHUB_SHA::7}"
           fi
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify lockstep versions
+        run: |
+          meson_v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" meson.build)
+          npm_v=$(node -p "require('./pkg/package.json').version")
+          [ "$meson_v" = "$npm_v" ] || { echo "version drift: meson=$meson_v npm=$npm_v"; exit 1; }
 
       - name: Configure + build
         run: |
@@ -53,10 +69,41 @@ jobs:
               || { echo "missing Embind binding: $fn"; exit 1; }
           done
 
-      - name: Stage bundle into out/
+      - name: Verify emcc --emit-tsd wrote index.raw.d.ts
+        run: |
+          [ -f pkg/index.raw.d.ts ] || { echo "missing pkg/index.raw.d.ts"; exit 1; }
+          grep -q 'export default function MainModuleFactory' pkg/index.raw.d.ts \
+            || { echo "pkg/index.raw.d.ts does not look like an emcc tsd output"; exit 1; }
+
+      - name: Stage demo bundle into out/
         run: DESTDIR="$(pwd)/out" meson install -C build-wasm
 
-      - name: Zip bundle
+      - name: Install TypeScript in pkg/
+        working-directory: pkg
+        run: npm install --no-audit --no-fund
+
+      - name: Build the npm package (wasm + TS + assets)
+        working-directory: pkg
+        run: npm run build
+
+      - name: Verify npm package layout
+        run: |
+          for f in package.json index.js index.d.ts index.raw.d.ts src/loader.js fbm.js fbm.wasm; do
+            [ -f "pkg/dist/$f" ] || { echo "missing pkg/dist/$f"; exit 1; }
+          done
+
+      - name: Pack npm tarball for GitHub Release
+        working-directory: pkg
+        run: npm pack
+
+      - name: Publish to npm
+        if: ${{ !inputs.skip_publish }}
+        working-directory: pkg
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Zip demo bundle
         run: (cd out && zip -r ../fbm-demo.zip .)
 
       - name: Publish GitHub Release
@@ -71,4 +118,5 @@ jobs:
             out/fbm.wasm
             out/fbm.js
             fbm-demo.zip
-          fail_on_unmatched_files: true
+            pkg/warthog-fbm-*.tgz
+          fail_on_unmatched_files: false

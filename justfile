@@ -25,7 +25,17 @@ reconfigure:
 clean:
     rm -rf build-wasm out
 
-# Bump version in meson.build, commit, and tag locally. Push yourself.
+# Build the npm package: wasm → tsc → assets. Mirrors CI step 10.
+build-pkg:
+    cd pkg && npm install --no-audit --no-fund && npm run build
+
+# Remove pkg/dist/ and pkg/node_modules/. The wasm build dir and demo out/
+# are not touched — use `just clean` for those.
+clean-pkg:
+    cd pkg && rm -rf dist node_modules
+
+# Bump version in meson.build AND pkg/package.json in lockstep, commit,
+# and tag locally. Push yourself.
 bump part="patch":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -40,17 +50,26 @@ bump part="patch":
     esac
     new="${major}.${minor}.${patch}"
     sed -i -E "s/(version\s*:\s*')$cur'/\1${new}'/" meson.build
-    git add meson.build
+    sed -i -E "s/(\"version\"\s*:\s*\")[^\"]+(\")/\1${new}\2/" pkg/package.json
+    git add meson.build pkg/package.json
     git commit -m "bump version to ${new}"
     git tag -a "v${new}" -m "Release v${new}"
     echo "Committed and tagged v${new}. Push with:"
     echo "    git push origin master --follow-tags"
 
 # Tag HEAD at the existing version (re-tag after a fixup). Push yourself.
+# Also re-syncs pkg/package.json if it ever drifts from meson.build.
 release:
     #!/usr/bin/env bash
     set -euo pipefail
     v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" meson.build)
+    npm_v=$(node -p "require('./pkg/package.json').version")
+    if [ "$v" != "$npm_v" ]; then
+      echo "Syncing pkg/package.json: ${npm_v} -> ${v}"
+      sed -i -E "s/(\"version\"\s*:\s*\")[^\"]+(\")/\1${v}\2/" pkg/package.json
+      git add pkg/package.json
+      git commit -m "sync pkg/package.json version to ${v}"
+    fi
     tag="v${v}"
     git tag -a "$tag" -m "Release $tag"
     echo "Tagged $tag. Push with:"

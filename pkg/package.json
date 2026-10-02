@@ -1,0 +1,33 @@
+{
+  "name": "warthog-fbm",
+  "version": "0.1.2",
+  "description": "Warthog Fair Batch Matching (FBM) engine — C++/WebAssembly, strict-typed via a two-file Embind architecture.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build:wasm": "cd .. && meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/ --reconfigure && meson compile -C build-wasm",
+    "stage": "cp -f ../build-wasm/fbm.js ../build-wasm/fbm.wasm .",
+    "publish:assets": "cp -f fbm.js fbm.wasm index.d.ts index.raw.d.ts dist/",
+    "build": "npm run build:wasm && npm run stage && npm run build:ts && npm run publish:assets",
+    "clean": "rm -rf dist ../build-wasm"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.0",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "sourceMap": true,
+    "resolveJsonModule": true
+  },
+  "include": ["./**/*.ts", "index.raw.d.ts"],
+  "exclude": ["dist", "node_modules", "stage"]
+}
