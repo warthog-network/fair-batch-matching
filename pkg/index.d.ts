@@ -4,21 +4,14 @@ import type { MainModule } from "./index.raw";
 
 export interface FbmConfig {
     /**
-     * Initial base token decimals, 0..18. Default `8`. Used only at
-     * construction. Changing at runtime requires `reset({ baseDecimals })`,
-     * which also clears the book + zeros the pool.
+     * Initial base token decimals, 0..18. Default `8`. Fixed at
+     * construction; immutable for the lifetime of the instance. To use a
+     * different decimal count, construct a new `FbmEngine`.
      */
     baseDecimals?: number;
     /** Initial pool trading fee in 1/10000 units, 0..9999. Default `5`. */
     feeE4?: number;
 }
-
-/**
- * Same shape as `FbmConfig`, but missing fields **preserve the current
- * value** rather than applying defaults. Use this when calling
- * `FbmEngine.reset()`.
- */
-export type ResetOptions = FbmConfig;
 
 /* ---------- Input interfaces ---------- */
 
@@ -33,7 +26,10 @@ export interface AddSellInput {
 }
 
 export interface SetPoolInput {
-    value: string;
+    /** Base token amount (decimals = `baseDecimals`). Missing = preserve current. */
+    base?: string;
+    /** WART amount (8 decimals). Missing = preserve current. */
+    quote?: string;
 }
 
 export interface SetFeeInput {
@@ -145,22 +141,19 @@ type RawFbmEngineInstance = InstanceType<MainModule["FbmEngine"]>;
  * changes to `baseDecimals` would silently re-interpret those integers
  * under a different decimal count, producing values that mean something
  * different from what was originally entered. To prevent this, the
- * engine deliberately omits a `setBaseDecimals` method — the only way
- * to change `baseDecimals` is `reset({ baseDecimals })`, which clears
- * the book + zeros both pool reserves atomically.
+ * engine deliberately omits a `setBaseDecimals` method —
+ * `baseDecimals` is fixed at construction.
  *
- * **Mutators** (`setPoolBase`, `setPoolQuote`, `setFee`, `addBuy`,
- * `addSell`, `deleteOrder`, `reset`) return `{ ok }` or `{ error }`
- * and never trigger a match. **Matching is explicit** — call
- * `engine.match()` whenever you want a fresh `MatchResult`. The
- * engine itself never returns null from `match()`; a `(0, 0)` pool
- * is treated as a valid (if degenerate) input.
+ * **Mutators** (`setPool`, `setFee`, `addBuy`, `addSell`,
+ * `deleteOrder`) return `{ ok }` or `{ error }` and never trigger a
+ * match. **Matching is explicit** — call `engine.match()` whenever
+ * you want a fresh `MatchResult`. The engine itself never returns
+ * null from `match()`; a `(0, 0)` pool is treated as a valid (if
+ * degenerate) input.
  */
 export type FbmEngine = Omit<
     RawFbmEngineInstance,
-    | "reset"
-    | "setPoolBase"
-    | "setPoolQuote"
+    | "setPool"
     | "setFee"
     | "addBuy"
     | "addSell"
@@ -169,25 +162,18 @@ export type FbmEngine = Omit<
     | "validateBaseAmount"
     | "validateQuoteAmount"
     | "getConfig"
-    | "getPoolBase"
-    | "getPoolQuote"
+    | "getPool"
     | "match"
 > & {
     /**
-     * Clears the book + zeros both pool reserves. Optionally updates
-     * `baseDecimals` and/or `feeE4` — missing keys preserve the current
-     * value, they do not revert to defaults.
-     *
-     * Both `reset()` and `reset({})` are equivalent — they clear state
-     * without changing config.
+     * Sets one or both pool reserves. Both `base` and `quote` are
+     * optional — missing fields preserve the current value rather than
+     * reverting to defaults.
      *
      * **Atomic**: if any provided field fails validation, the whole
-     * call is rejected and book / pool / config are left untouched
-     * (consistent with `setPoolBase` / `setPoolQuote` / `setFee`).
+     * call is rejected and neither reserve changes.
      */
-    reset(options?: ResetOptions): OkResponse;
-    setPoolBase(input: SetPoolInput): MutatorResult;
-    setPoolQuote(input: SetPoolInput): MutatorResult;
+    setPool(input: SetPoolInput): MutatorResult;
     setFee(input: SetFeeInput): MutatorResult;
     addBuy(input: AddBuyInput): MutatorResult;
     addSell(input: AddSellInput): MutatorResult;
@@ -201,8 +187,7 @@ export type FbmEngine = Omit<
     validateBaseAmount(input: ValidateBaseAmountInput): MutatorResult;
     validateQuoteAmount(input: ValidateQuoteAmountInput): MutatorResult;
     getConfig(): FbmEngineConfig;
-    getPoolBase(): string;
-    getPoolQuote(): string;
+    getPool(): { base: string; quote: string };
     match(): MatchResult;
 };
 

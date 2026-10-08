@@ -8,96 +8,83 @@ test("defaults: baseDecimals=8, feeE4=5, pool=(0,0)", async () => {
     const e = await freshEngine();
     assert.deepEqual(e.getConfig(), { baseDecimals: 8, feeE4: 5 });
     // FundsDecimal::to_string returns "0" (no decimal padding) when value is 0.
-    assert.equal(e.getPoolBase(), "0");
-    assert.equal(e.getPoolQuote(), "0");
+    assert.deepEqual(e.getPool(), { base: "0", quote: "0" });
 });
 
 test("constructor with custom config", async () => {
     const e = await freshEngine({ baseDecimals: 3, feeE4: 10 });
     assert.deepEqual(e.getConfig(), { baseDecimals: 3, feeE4: 10 });
-    assert.equal(e.getPoolBase(), "0"); // formatted with baseDecimals=3
+    assert.equal(e.getPool().base, "0"); // formatted with baseDecimals=3
 });
 
 test("multiple instances are independent", async () => {
     const a = await freshEngine();
     const b = await freshEngine();
-    a.setPoolBase({ value: "100" });
-    b.setPoolBase({ value: "200" });
-    assert.equal(a.getPoolBase(), "100.00000000");
-    assert.equal(b.getPoolBase(), "200.00000000");
-    a.reset();
-    assert.equal(a.getPoolBase(), "0");
-    assert.equal(b.getPoolBase(), "200.00000000");
+    a.setPool({ base: "100" });
+    b.setPool({ base: "200" });
+    assert.equal(a.getPool().base, "100.00000000");
+    assert.equal(b.getPool().base, "200.00000000");
+    a.setPool({ base: "0", quote: "0" });
+    assert.equal(a.getPool().base, "0");
+    assert.equal(b.getPool().base, "200.00000000");
 });
 
-// ─── Reset semantics ──────────────────────────────────────────────────────
+// ─── setPool semantics ────────────────────────────────────────────────────
 
-test("reset() and reset({}) are equivalent", async () => {
-    const e1 = await freshEngine({ baseDecimals: 3, feeE4: 7 });
-    const e2 = await freshEngine({ baseDecimals: 3, feeE4: 7 });
-    e1.setPoolBase({ value: "100" });
-    e2.setPoolBase({ value: "100" });
-    e1.reset();
-    e2.reset({});
-    assert.equal(e1.getPoolBase(), e2.getPoolBase());
-    assert.equal(e1.getPoolQuote(), e2.getPoolQuote());
-    assert.deepEqual(e1.getConfig(), e2.getConfig());
+test("setPool({}) is a no-op", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    const before = e.getPool();
+    const r = e.setPool({});
+    assert.deepEqual(r, { ok: true });
+    assert.deepEqual(e.getPool(), before);
 });
 
-test("reset() clears book + pool, preserves config", async () => {
-    const e = await freshEngine({ baseDecimals: 3, feeE4: 7 });
-    e.setPoolBase({ value: "100" });
-    e.setPoolQuote({ value: "200" });
-    e.addSell({ price: "1", amount: "10" });
-    e.reset();
-    assert.equal(e.getPoolBase(), "0");
-    assert.equal(e.getPoolQuote(), "0");
-    assert.deepEqual(e.getConfig(), { baseDecimals: 3, feeE4: 7 });
+test("setPool({base}) updates only base", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    const r = e.setPool({ base: "300" });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(e.getPool().base, "300.00000000");
+    assert.equal(e.getPool().quote, "200.00000000");
 });
 
-test("reset({baseDecimals: 3}) preserves feeE4", async () => {
-    const e = await freshEngine({ baseDecimals: 8, feeE4: 10 });
-    e.reset({ baseDecimals: 3 });
-    assert.deepEqual(e.getConfig(), { baseDecimals: 3, feeE4: 10 });
-});
-
-test("reset({feeE4: 50}) preserves baseDecimals", async () => {
-    const e = await freshEngine({ baseDecimals: 3, feeE4: 5 });
-    e.reset({ feeE4: 50 });
-    assert.deepEqual(e.getConfig(), { baseDecimals: 3, feeE4: 50 });
-});
-
-test("reset({baseDecimals: 'oops'}) is atomic — config unchanged", async () => {
-    const e = await freshEngine({ baseDecimals: 3, feeE4: 5 });
-    e.setPoolBase({ value: "100" });
-    e.setPoolQuote({ value: "200" });
-    const cfgBefore = e.getConfig();
-    const poolBefore = e.getPoolBase();
-    // Bypass the type check to feed a bad value at runtime.
-    const r = e.reset({ baseDecimals: "oops" } as unknown as { baseDecimals?: number });
-    assert.ok("error" in r);
-    assert.deepEqual(e.getConfig(), cfgBefore);
-    assert.equal(e.getPoolBase(), poolBefore);
+test("setPool({quote}) updates only quote", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    const r = e.setPool({ quote: "500" });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(e.getPool().base, "100.00000000");
+    assert.equal(e.getPool().quote, "500.00000000");
 });
 
 // ─── Mutator atomicity ────────────────────────────────────────────────────
 
-test("setPoolBase({value: 'garbage'}) is atomic", async () => {
+test("setPool({base: 'garbage'}) is atomic — neither changes", async () => {
     const e = await freshEngine();
-    e.setPoolBase({ value: "100" });
-    const before = e.getPoolBase();
-    const r = e.setPoolBase({ value: "garbage" });
+    e.setPool({ base: "100", quote: "200" });
+    const before = e.getPool();
+    const r = e.setPool({ base: "garbage" });
     assert.ok("error" in r);
-    assert.equal(e.getPoolBase(), before);
+    assert.deepEqual(e.getPool(), before);
 });
 
-test("setPoolQuote({value: 'garbage'}) is atomic", async () => {
+test("setPool({quote: 'garbage'}) is atomic — neither changes", async () => {
     const e = await freshEngine();
-    e.setPoolQuote({ value: "500" });
-    const before = e.getPoolQuote();
-    const r = e.setPoolQuote({ value: "garbage" });
+    e.setPool({ base: "100", quote: "200" });
+    const before = e.getPool();
+    const r = e.setPool({ quote: "garbage" });
     assert.ok("error" in r);
-    assert.equal(e.getPoolQuote(), before);
+    assert.deepEqual(e.getPool(), before);
+});
+
+test("setPool({base: 'ok', quote: 'garbage'}) is atomic — neither changes", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    const before = e.getPool();
+    const r = e.setPool({ base: "999", quote: "garbage" });
+    assert.ok("error" in r);
+    assert.deepEqual(e.getPool(), before);
 });
 
 // ─── Pure-parse validators (no state change) ───────────────────────────
@@ -165,8 +152,7 @@ test("match() on (0,0) pool with no orders keeps pool untouched", async () => {
 
 test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
     const e = await freshEngine({ baseDecimals: 3, feeE4: 10 });
-    e.setPoolBase({ value: "1000" });
-    e.setPoolQuote({ value: "5000" }); // pool price = 5 WART/token
+    e.setPool({ base: "1000", quote: "5000" }); // pool price = 5 WART/token
     e.addSell({ price: "3", amount: "100" }); // below pool — routes to pool
     e.addSell({ price: "4", amount: "200" }); // at pool — routes to pool
     e.addSell({ price: "7", amount: "300" }); // above pool — needs buyer at 7+

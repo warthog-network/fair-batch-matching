@@ -19,7 +19,7 @@ using emval = emscripten::val;
  *
  * Mutators are atomic: input is parsed before any state mutation, and
  * a parse failure returns `{ error: ... }` with **no** state change.
- * Applies to `setPoolBase`, `setPoolQuote`, `setFee`, and `reset({...})`.
+ * Applies to `setPool` and `setFee`.
  *
  * `match()` is the only state-reading operation and is always safe to
  * call — it returns a full result even with a `(0, 0)` pool.
@@ -35,8 +35,8 @@ using emval = emscripten::val;
  * silently re-interprets those integers under a different decimal count,
  * producing values that mean something different from what was originally
  * entered. To prevent this, the engine deliberately omits a
- * `setBaseDecimals` method. The only way to change `baseDecimals` is
- * `reset({ baseDecimals })`, which also clears the book + zeros the pool.
+ * `setBaseDecimals` method. `baseDecimals` is fixed at construction; to
+ * use a different decimal count, construct a new `FbmEngine`.
  */
 
 namespace {
@@ -186,89 +186,56 @@ public:
     // Each returns { ok } on success or { error } on failure. They never
     // return a match result — that's `match()`'s job.
 
-    // No-arg reset: same as reset({}). The Embind binding requires this
-    // overload so callers can write `engine.reset()` without tripping the
-    // argument-count check. Both forms go through the same body.
-    emval reset() { return reset(emval::object()); }
-
-    emval reset(emval opts)
+    emval setPool(emval v)
     {
-        // Validate first, mutate last. If any field is invalid, return
-        // { error } without touching book / pool / config — consistent
-        // with the atomicity of setPoolBase / setPoolQuote / setFee.
+        // Validate first, mutate last. Both fields are optional; missing
+        // ones leave the corresponding reserve untouched. If any provided
+        // field is invalid, the whole call is rejected and neither
+        // reserve changes.
 
-        std::optional<TokenDecimals> newBaseDecimals;
-        std::optional<uint32_t> newFeeE4;
+        std::optional<Funds_uint64> newBase;
+        std::optional<Wart> newQuote;
 
-        // baseDecimals: missing/null → PRESERVE current value (no defaults here).
-        if (opts.call<bool>("hasOwnProperty", std::string("baseDecimals"))
-            && !opts["baseDecimals"].isUndefined()
-            && !opts["baseDecimals"].isNull()) {
-            long bd { 0 };
-            if (auto err = parse_strict_int_field(opts, "baseDecimals", 0, 18, &bd);
-                !err.isNull()) {
-                return err;
+        if (v.call<bool>("hasOwnProperty", std::string("base"))
+            && !v["base"].isUndefined()
+            && !v["base"].isNull()) {
+            std::string raw;
+            try {
+                raw = v["base"].as<std::string>();
+            } catch (...) {
+                return make_error("setPool: 'base' must be a string");
             }
-            newBaseDecimals = TokenDecimals { static_cast<uint8_t>(bd) };
-        }
-
-        // feeE4: missing/null → PRESERVE current value.
-        if (opts.call<bool>("hasOwnProperty", std::string("feeE4"))
-            && !opts["feeE4"].isUndefined()
-            && !opts["feeE4"].isNull()) {
-            long fee { 0 };
-            if (auto err = parse_strict_int_field(opts, "feeE4", 0, 9999, &fee);
-                !err.isNull()) {
-                return err;
+            auto parsed = Funds_uint64::parse(raw, baseDecimals_);
+            if (!parsed) {
+                return make_error(
+                    "setPool: cannot parse \"" + raw + "\" as base token amount");
             }
-            newFeeE4 = static_cast<uint32_t>(fee);
+            newBase = *parsed;
         }
 
-        // All validations passed — commit the changes.
-        if (newBaseDecimals) {
-            baseDecimals_ = *newBaseDecimals;
+        if (v.call<bool>("hasOwnProperty", std::string("quote"))
+            && !v["quote"].isUndefined()
+            && !v["quote"].isNull()) {
+            std::string raw;
+            try {
+                raw = v["quote"].as<std::string>();
+            } catch (...) {
+                return make_error("setPool: 'quote' must be a string");
+            }
+            Result<Wart> parsed = Wart::try_parse(raw);
+            if (!parsed.has_value()) {
+                return make_error(
+                    "setPool: cannot parse \"" + raw + "\" as WART amount");
+            }
+            newQuote = parsed.value();
         }
-        if (newFeeE4) {
-            feeE4_ = *newFeeE4;
-        }
-        bso_.clear();
-        poolToken_ = Funds_uint64::zero();
-        poolWart_ = Wart::zero();
 
-        return make_ok();
-    }
-
-    emval setPoolBase(emval v)
-    {
-        std::string raw;
-        try {
-            raw = v["value"].as<std::string>();
-        } catch (...) {
-            return make_error("setPoolBase: 'value' must be a string");
+        if (newBase) {
+            poolToken_ = *newBase;
         }
-        auto parsed = Funds_uint64::parse(raw, baseDecimals_);
-        if (!parsed) {
-            return make_error(
-                "setPoolBase: cannot parse \"" + raw + "\" as base token amount");
+        if (newQuote) {
+            poolWart_ = *newQuote;
         }
-        poolToken_ = *parsed; // atomic — failure leaves value alone
-        return make_ok();
-    }
-
-    emval setPoolQuote(emval v)
-    {
-        std::string raw;
-        try {
-            raw = v["value"].as<std::string>();
-        } catch (...) {
-            return make_error("setPoolQuote: 'value' must be a string");
-        }
-        Result<Wart> parsed = Wart::try_parse(raw);
-        if (!parsed.has_value()) {
-            return make_error(
-                "setPoolQuote: cannot parse \"" + raw + "\" as WART amount");
-        }
-        poolWart_ = parsed.value(); // atomic — failure leaves value alone
         return make_ok();
     }
 
@@ -385,14 +352,12 @@ public:
         return obj;
     }
 
-    std::string getPoolBase() const
+    emval getPool() const
     {
-        return poolToken_.to_decimal(baseDecimals_).to_string();
-    }
-
-    std::string getPoolQuote() const
-    {
-        return poolWart_.as_wart().to_string();
+        emval obj = emval::object();
+        obj.set("base", emval(poolToken_.to_decimal(baseDecimals_).to_string()));
+        obj.set("quote", emval(poolWart_.as_wart().to_string()));
+        return obj;
     }
 
     // ─── Match ────────────────────────────────────────────────────────────
@@ -400,7 +365,7 @@ public:
     // Always returns a full MatchResult. (0, 0) pool is valid; the result
     // simply has all-zero pool snapshots + no fills. The JS side is
     // responsible for gating when to call this (e.g. only when both pool
-    // fields have been successfully set since the last reset).
+    // fields have been successfully set).
 
     emval match() const
     {
@@ -541,16 +506,7 @@ EMSCRIPTEN_BINDINGS(fbm)
 {
     emscripten::class_<FbmEngine>("FbmEngine")
         .constructor<emscripten::val>()
-        // Two `reset` overloads bound to the same JS name. The no-arg form
-        // makes `engine.reset()` callable; both go through validate-first
-        // semantics, so partial-update failures leave book / pool / config
-        // untouched.
-        .function("reset",
-            emscripten::select_overload<emscripten::val()>(&FbmEngine::reset))
-        .function("reset",
-            emscripten::select_overload<emscripten::val(emscripten::val)>(&FbmEngine::reset))
-        .function("setPoolBase", &FbmEngine::setPoolBase)
-        .function("setPoolQuote", &FbmEngine::setPoolQuote)
+        .function("setPool", &FbmEngine::setPool)
         .function("setFee", &FbmEngine::setFee)
         .function("addBuy", &FbmEngine::addBuy)
         .function("addSell", &FbmEngine::addSell)
@@ -559,7 +515,6 @@ EMSCRIPTEN_BINDINGS(fbm)
         .function("validateBaseAmount", &FbmEngine::validateBaseAmount)
         .function("validateQuoteAmount", &FbmEngine::validateQuoteAmount)
         .function("getConfig", &FbmEngine::getConfig)
-        .function("getPoolBase", &FbmEngine::getPoolBase)
-        .function("getPoolQuote", &FbmEngine::getPoolQuote)
+        .function("getPool", &FbmEngine::getPool)
         .function("match", &FbmEngine::match);
 }

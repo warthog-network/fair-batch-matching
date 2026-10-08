@@ -5,7 +5,6 @@ export type {
     FbmEngineClass,
     FbmEngineConfig,
     FbmConfig,
-    ResetOptions,
     InitOptions,
     AddBuyInput,
     AddSellInput,
