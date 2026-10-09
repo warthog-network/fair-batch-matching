@@ -2,7 +2,7 @@ set shell := ["bash", "-uc"]
 
 default: build
 
-build: configure compile stage
+build: configure compile build-pkg stage stage-pkg
 
 configure:
     meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/
@@ -13,7 +13,15 @@ compile:
 stage:
     DESTDIR="$(pwd)/out" meson install -C build-wasm
 
-dev: configure compile
+# Copy the runtime parts of pkg/dist/ into out/ for the demo zip.
+# .d.ts files stay in pkg/dist/ (they ship via the npm tarball instead,
+# which is what TypeScript consumers need).
+stage-pkg:
+    mkdir -p out/pkg/dist/src
+    cp -f pkg/dist/index.js pkg/dist/fbm.js pkg/dist/fbm.wasm out/pkg/dist/
+    cp -f pkg/dist/src/loader.js out/pkg/dist/src/
+
+dev: build-pkg
     (cd demo && python3 server.py)
 
 run: build

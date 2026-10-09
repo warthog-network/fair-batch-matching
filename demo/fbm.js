@@ -1,1 +1,0 @@
-../build-wasm/fbm.js

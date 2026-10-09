@@ -75,21 +75,25 @@
             <div id="matchOutput"></div>
         </section>
 
+        <script type="importmap">
+        {
+            "imports": {
+                "warthog-fbm": "../pkg/dist/index.js"
+            }
+        }
+        </script>
         <script type="module">
-            import init from "./fbm.js";
+            import FbmEngine from "warthog-fbm";
 
             // ─── Init ────────────────────────────────────────────────────────
-            // `fbm.js` is the raw Embind loader. It exports a default factory
-            // function; once awaited, the result is the Module object whose
-            // `FbmEngine` member is the engine class constructor.
-            //
-            // (If you are using the npm wrapper instead, the equivalent is
-            // `import FbmEngine from "warthog-fbm"; await FbmEngine.init();`
-            // — same shape, no manual Module step.)
+            // `warthog-fbm` is the npm package wrapping the wasm engine.
+            // The import map above points it at the locally-built package
+            // (`../pkg/dist/index.js`), so the demo uses the same code path
+            // as real consumers — no raw Embind loader is needed.
             let engine = null;
             try {
-                const Module = await init();
-                engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 5 });
+                await FbmEngine.init();
+                engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
             } catch (err) {
                 document.body.innerHTML = `<pre>Failed to load FBM engine: ${err.message}</pre>`;
                 throw err;

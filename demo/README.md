@@ -20,18 +20,40 @@ Then open http://localhost:8000/demo.html in a browser.
 `fbm.js` and `fbm.wasm` always go together. `fbm.js` looks for `fbm.wasm`
 next to itself; renaming either breaks the pairing.
 
-## Embedding the engine (raw, no package)
+## Embedding the engine (npm package)
 
-Drop `fbm.js` and `fbm.wasm` next to your html, then use the raw-loader
-pattern. `fbm.js` is the Embind loader; its default export is a factory
-that returns the wasm `Module` object. The `FbmEngine` class lives on
-`Module.FbmEngine`.
+The demo itself is built this way. Install the package and import it:
+
+```html
+<script type="module">
+    import FbmEngine from "warthog-fbm";
+    await FbmEngine.init();
+    // Pool reserves default to (0, 0) until you call setPool.
+    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+    engine.setPool({ base: "100", quote: "200" });
+    const m = engine.match();
+    console.log(m.matched.price);
+</script>
+```
+
+```sh
+npm install warthog-fbm
+```
+
+The package's `FbmEngine.init()` fetches the wasm next to the
+package's `fbm.js`. The package does the Embind wrapping for you —
+no manual `Module` step.
+
+### Embedding without the package (raw Embind)
+
+If you want to ship the wasm as standalone files (no npm), the raw
+loader pattern is still available. Drop `fbm.js` and `fbm.wasm` next
+to your html:
 
 ```html
 <script type="module">
     import init from "./fbm.js";
     const Module = await init();
-    // Pool reserves default to (0, 0) until you call setPool.
     const engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 5 });
     engine.setPool({ base: "100", quote: "200" });
     const m = engine.match();
@@ -39,11 +61,29 @@ that returns the wasm `Module` object. The `FbmEngine` class lives on
 </script>
 ```
 
-(If you depend on the npm package `warthog-fbm` instead, the equivalent
-is `import FbmEngine from "warthog-fbm"; await FbmEngine.init(); const
-engine = new FbmEngine({...})` — same shape, no manual Module.)
+`fbm.js` looks for `fbm.wasm` next to itself; rename neither. The
+`Module.FbmEngine` shape is the same as the npm package's
+`FbmEngine` — same constructor, same methods.
 
-`fbm.js` looks for `fbm.wasm` next to itself; rename neither.
+### Where the demo's import map points
+
+The demo HTML uses a browser-native import map to resolve the package
+name to the locally-built copy at `../pkg/dist/index.js`:
+
+```html
+<script type="importmap">
+{
+  "imports": {
+    "warthog-fbm": "../pkg/dist/index.js"
+  }
+}
+</script>
+```
+
+This lets the demo write `import FbmEngine from "warthog-fbm"` (the
+same import a Node.js consumer would write) while serving files
+straight from disk via `python3 server.py`. No bundler, no
+`node_modules`, no `package.json` in the demo.
 
 ## API
 
