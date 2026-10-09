@@ -1,5 +1,5 @@
 project('fbm-demo', 'cpp',
-  version : '0.4.0',
+  version : '0.5.0',
   default_options : ['warning_level=3',
     'cpp_std=c++23',
     'buildtype=release'])
