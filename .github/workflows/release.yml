@@ -64,9 +64,14 @@ jobs:
 
       - name: Verify Embind symbols present
         run: |
-          # FbmEngine class + 10 methods (7 mutators/match + 3 getters) and the
-          # factory class binding.
-          for fn in FbmEngine reset setPoolBase setPoolQuote setFee addBuy addSell deleteOrder getConfig getPoolBase getPoolQuote match; do
+          # FbmEngine class + 14 methods
+          # (6 mutators, 3 validators, 4 getters, 1 match).
+          for fn in FbmEngine \
+                    setPool setFeeE4 \
+                    addBuy addSell deleteBuyAt deleteSellAt \
+                    validateLimit validateBaseAmount validateQuoteAmount \
+                    getConfig getPool getBuyAt getSellAt \
+                    match; do
             strings build-wasm/fbm.wasm | grep -qx "$fn" \
               || { echo "missing Embind binding: $fn"; exit 1; }
           done
