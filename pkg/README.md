@@ -48,7 +48,13 @@ const e: Engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
 - The `baseDecimals` parameter specifies the number of decimal places for the base currency and accepts integers: `0-18`. The default value is `8` if omitted. `baseDecimals` is fixed at construction and cannot be changed for the lifetime of the instance; to use a different decimal count, construct a new `FbmEngine`.
 - The `feeE4` parameter specifies the pool fee that takers pay when interacting with the liquidity pool and accepts integers `0-9999` with default value `5` if omitted. The fee corresponds to this value multiplied by `0.0001%`. In particular, the default value corresponds to `0.05%`. The fee can be changed later using `e.setFee({ E4: 30 });`.
 
+The configuration can be queried:
+```ts
+e.getConfig();   //=> { baseDecimals: 8, feeE4: 5 }
+```
+
 There is no global state such that multiple instances can coexist if needed.
+
 
 ### Configuring the Pool
 
@@ -57,11 +63,16 @@ Each instance has an associated liquidity pool. The base and quote currency rese
 // Set both reserves at once.
 e.setPool({ base: "100", quote: "200" });
 
-// Or just one — the other is preserved.
+// Or just one, preserving the other.
 e.setPool({ base: "100" });
 e.setPool({ quote: "200" });
 ```
 The method returns `{ ok: true }` on success, `{ error: "..." }` on failure. The whole call is atomic: if either provided field is invalid, neither reserve changes.
+
+Pool can be retrieved:
+```ts
+e.getPool();     //=> { base: "100.00000000", quote: "200.00000000" }
+```
 
 ### Configuring the Order Book
 The order book consists of swap orders with a specific price and amount to be swapped, i.e. the swap's input amount. Note that this is different  is an important difference to traditional order books on centralized exchanges where the amount of a buy order specifies the amount of base currency to be purchased, i.e. the trade's output amount.
@@ -79,9 +90,11 @@ The methods return `{ ok: true }` on success, `{ error: "..." }` on failure.
 #### Deleting Orders
 
 ```ts
-e.deleteOrder({ base: true,  index: 0 });     // first sell order
-e.deleteOrder({ base: false, index: 0 });     // first buy order
+e.deleteBuy({ index: 0 });   // first buy
+e.deleteSell({ index: 0 });  // first sell
 ```
+
+Returns `{ ok: true }` on success or `{ error: "..." }` if `index` is missing or out of range. The index refers to the sorted book from the most recent `match()` call (buys DESC, sells ASC); deleting an entry removes the entire merged amount at that price level.
 
 ### Pre-Validating Input
 To pre-validate the string parameters used above, the following validation methods can be used:
@@ -91,7 +104,8 @@ e.validatePrice({ price: "1.0" });        // for `price` in `addBuy` and `addSel
 e.validateBaseAmount({ amount: "5" });    // for `quote` in `setPool` and `amount` in `addBuy`
 e.validateQuoteAmount({ amount: "5" });   // for `base` in `setPool` and `amount` in `addSell`
 ```
-The amount validation functions account for the currency's respective number allowed decimal digits.
+
+The calls return `{ ok: true }` on success or `{ error: "..." }` on failure. The amount validators account for the currency's respective number of allowed decimal digits (8 for WART, `baseDecimals` for the base token).
 
 
 
@@ -106,7 +120,8 @@ Its output has the following structure:
 ```ts
 const m: MatchResult = {
   // Book after matching, sorted (buys DESC, sells ASC).
-  // The array index is what you pass to `deleteOrder`.
+  // The array index is what you pass to `deleteBuy` (for buys) or
+  // `deleteSell` (for sells).
   //   amount = original order size
   //   filled = how much was consumed
   //   limit  = the order's limit price (quote per base)
@@ -136,17 +151,6 @@ const m: MatchResult = {
 };
 ```
 Matching with an empty pool is supported.
-
-## Getters
-
-```ts
-e.getConfig();   //=> { baseDecimals: 3, feeE4: 30 }
-e.getPool();     //=> { base: "100.00000000", quote: "200.00000000" }
-```
-
-`getPool()` returns `{ base: "0", quote: "0" }` (not `"0.00000000"`) for
-an unconfigured pool.
-
 
 ## License
 

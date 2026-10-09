@@ -60,7 +60,8 @@ fee, and baseDecimals. Multiple instances share the same wasm module.
 | `setFee` | `{ E4: number }` (0–9999) | updates `feeE4` only on parse success; failure leaves prior value |
 | `addBuy` | `{ price: string, amount: string }` (WART) | inserts buy order |
 | `addSell` | `{ price: string, amount: string }` (TOKEN) | inserts sell order |
-| `deleteOrder` | `{ base: boolean, index: number }` | removes one order |
+| `deleteBuy` | `{ index: number }` | removes one buy order |
+| `deleteSell` | `{ index: number }` | removes one sell order |
 | `validatePrice` | `{ price: string }` | parses price only, **no state change**; use for live field validation |
 | `validateBaseAmount` | `{ amount: string }` (WART, 8 dp) | parses buy amount only, **no state change** |
 | `validateQuoteAmount` | `{ amount: string }` (TOKEN) | parses sell amount with current `baseDecimals`, **no state change** |

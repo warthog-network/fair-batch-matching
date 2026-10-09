@@ -279,21 +279,28 @@ public:
         return make_ok();
     }
 
-    emval deleteOrder(emval v)
+    emval deleteBuy(emval v)
     {
-        if (v["base"].isUndefined() || v["index"].isUndefined()) {
-            return make_error("deleteOrder: missing 'base' or 'index'");
+        if (v["index"].isUndefined()) {
+            return make_error("deleteBuy: missing 'index'");
         }
         try {
-            bool base = v["base"].as<bool>();
-            auto i = v["index"].as<size_t>();
-            if (base) {
-                bso_.delete_base(i);
-            } else {
-                bso_.delete_quote(i);
-            }
+            bso_.delete_quote(v["index"].as<size_t>());
         } catch (...) {
-            return make_error("deleteOrder: 'index' must be a non-negative integer");
+            return make_error("deleteBuy: 'index' must be a non-negative integer");
+        }
+        return make_ok();
+    }
+
+    emval deleteSell(emval v)
+    {
+        if (v["index"].isUndefined()) {
+            return make_error("deleteSell: missing 'index'");
+        }
+        try {
+            bso_.delete_base(v["index"].as<size_t>());
+        } catch (...) {
+            return make_error("deleteSell: 'index' must be a non-negative integer");
         }
         return make_ok();
     }
@@ -510,7 +517,8 @@ EMSCRIPTEN_BINDINGS(fbm)
         .function("setFee", &FbmEngine::setFee)
         .function("addBuy", &FbmEngine::addBuy)
         .function("addSell", &FbmEngine::addSell)
-        .function("deleteOrder", &FbmEngine::deleteOrder)
+        .function("deleteBuy", &FbmEngine::deleteBuy)
+        .function("deleteSell", &FbmEngine::deleteSell)
         .function("validatePrice", &FbmEngine::validatePrice)
         .function("validateBaseAmount", &FbmEngine::validateBaseAmount)
         .function("validateQuoteAmount", &FbmEngine::validateQuoteAmount)

@@ -128,6 +128,38 @@ test("validators do NOT mutate state", async () => {
     assert.equal(e.match().sells.length, 0);
 });
 
+// ─── Order deletion ──────────────────────────────────────────────────────
+
+test("deleteBuy removes from buys, leaves sells alone", async () => {
+    const e = await freshEngine({ baseDecimals: 3 });
+    e.setPool({ base: "100", quote: "200" });
+    e.addBuy({ price: "1", amount: "5" });
+    e.addBuy({ price: "1", amount: "3" });   // merges with previous at price 1
+    e.addSell({ price: "2", amount: "4" });
+    assert.equal(e.match().buys.length, 1);
+    assert.equal(e.match().sells.length, 1);
+
+    const r = e.deleteBuy({ index: 0 });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(e.match().buys.length, 0);
+    assert.equal(e.match().sells.length, 1);
+});
+
+test("deleteSell removes from sells, leaves buys alone", async () => {
+    const e = await freshEngine({ baseDecimals: 3 });
+    e.setPool({ base: "100", quote: "200" });
+    e.addBuy({ price: "2", amount: "5" });
+    e.addSell({ price: "1", amount: "5" });
+    e.addSell({ price: "1", amount: "3" });  // merges with previous at price 1
+    assert.equal(e.match().buys.length, 1);
+    assert.equal(e.match().sells.length, 1);
+
+    const r = e.deleteSell({ index: 0 });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(e.match().buys.length, 1);
+    assert.equal(e.match().sells.length, 0);
+});
+
 // ─── Match ──────────────────────────────────────────────────────────────
 
 test("match() on empty engine returns all-zero result", async () => {

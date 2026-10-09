@@ -322,7 +322,7 @@
                 const btn = e.target.closest("button[data-buy-index]");
                 if (!btn) return;
                 const idx = Number(btn.dataset.buyIndex);
-                const res = engine.deleteOrder({ base: false, index: idx });
+                const res = engine.deleteBuy({ index: idx });
                 if ("ok" in res) {
                     tryMatch();
                 } else {
@@ -333,7 +333,7 @@
                 const btn = e.target.closest("button[data-sell-index]");
                 if (!btn) return;
                 const idx = Number(btn.dataset.sellIndex);
-                const res = engine.deleteOrder({ base: true, index: idx });
+                const res = engine.deleteSell({ index: idx });
                 if ("ok" in res) {
                     tryMatch();
                 } else {

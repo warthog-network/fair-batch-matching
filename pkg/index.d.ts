@@ -36,8 +36,11 @@ export interface SetFeeInput {
     E4: number;
 }
 
-export interface DeleteOrderInput {
-    base: boolean;
+export interface DeleteBuyInput {
+    index: number;
+}
+
+export interface DeleteSellInput {
     index: number;
 }
 
@@ -145,11 +148,11 @@ type RawFbmEngineInstance = InstanceType<MainModule["FbmEngine"]>;
  * `baseDecimals` is fixed at construction.
  *
  * **Mutators** (`setPool`, `setFee`, `addBuy`, `addSell`,
- * `deleteOrder`) return `{ ok }` or `{ error }` and never trigger a
- * match. **Matching is explicit** — call `engine.match()` whenever
- * you want a fresh `MatchResult`. The engine itself never returns
- * null from `match()`; a `(0, 0)` pool is treated as a valid (if
- * degenerate) input.
+ * `deleteBuy`, `deleteSell`) return `{ ok }` or `{ error }` and
+ * never trigger a match. **Matching is explicit** — call
+ * `engine.match()` whenever you want a fresh `MatchResult`. The
+ * engine itself never returns null from `match()`; a `(0, 0)` pool
+ * is treated as a valid (if degenerate) input.
  */
 export type FbmEngine = Omit<
     RawFbmEngineInstance,
@@ -157,7 +160,8 @@ export type FbmEngine = Omit<
     | "setFee"
     | "addBuy"
     | "addSell"
-    | "deleteOrder"
+    | "deleteBuy"
+    | "deleteSell"
     | "validatePrice"
     | "validateBaseAmount"
     | "validateQuoteAmount"
@@ -177,7 +181,8 @@ export type FbmEngine = Omit<
     setFee(input: SetFeeInput): MutatorResult;
     addBuy(input: AddBuyInput): MutatorResult;
     addSell(input: AddSellInput): MutatorResult;
-    deleteOrder(input: DeleteOrderInput): MutatorResult;
+    deleteBuy(input: DeleteBuyInput): MutatorResult;
+    deleteSell(input: DeleteSellInput): MutatorResult;
     /**
      * Pure-parse validators. Return `{ ok }` if the input is valid, or
      * `{ error }` describing why not. **No state is mutated** — these
