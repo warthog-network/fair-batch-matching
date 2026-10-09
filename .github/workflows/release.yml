@@ -53,14 +53,14 @@ jobs:
 
       - name: Verify lockstep versions
         run: |
-          meson_v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" meson.build)
+          meson_v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" cpp/meson.build)
           npm_v=$(node -p "require('./pkg/package.json').version")
           [ "$meson_v" = "$npm_v" ] || { echo "version drift: meson=$meson_v npm=$npm_v"; exit 1; }
 
       - name: Configure + build
         run: |
-          meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/
-          meson compile -C build-wasm
+          meson setup cpp/build-wasm --cross-file=cpp/crosscompile/emscripten.txt --prefix=/
+          meson compile -C cpp/build-wasm
 
       - name: Verify Embind symbols present
         run: |
@@ -72,7 +72,7 @@ jobs:
                     validateLimit validateBaseAmount validateQuoteAmount \
                     getConfig getPool getBuyAt getSellAt \
                     match; do
-            strings build-wasm/fbm.wasm | grep -qx "$fn" \
+            strings cpp/build-wasm/fbm.wasm | grep -qx "$fn" \
               || { echo "missing Embind binding: $fn"; exit 1; }
           done
 
@@ -82,8 +82,8 @@ jobs:
           grep -q 'export default function MainModuleFactory' pkg/index.raw.d.ts \
             || { echo "pkg/index.raw.d.ts does not look like an emcc tsd output"; exit 1; }
 
-      - name: Stage demo bundle into out/
-        run: DESTDIR="$(pwd)/out" meson install -C build-wasm
+      - name: Stage demo bundle into demo/out/
+        run: just stage
 
       - name: Install TypeScript in pkg/
         working-directory: pkg
@@ -116,7 +116,7 @@ jobs:
         run: npm publish --access public --provenance
 
       - name: Zip demo bundle
-        run: (cd out && zip -r ../fbm-demo.zip .)
+        run: (cd demo/out && zip -r ../../fbm-demo.zip .)
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -127,8 +127,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            out/fbm.wasm
-            out/fbm.js
             fbm-demo.zip
             pkg/warthog-fbm-*.tgz
           fail_on_unmatched_files: false

@@ -5,33 +5,43 @@ default: build
 build: configure compile build-pkg stage stage-pkg
 
 configure:
-    meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/
+    (cd cpp && meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/)
 
 compile:
-    meson compile -C build-wasm
+    meson compile -C cpp/build-wasm
 
+# Copy the demo sources into demo/out/ for the bundle. Meson install
+# doesn't do this anymore (cross-dir install_dir paths don't resolve
+# reliably); the justfile owns the staging.
 stage:
-    DESTDIR="$(pwd)/out" meson install -C build-wasm
+    mkdir -p demo/out
+    cp -f demo/src/demo.html demo/src/server.py demo/src/README.md demo/out/
 
-# Copy the runtime parts of pkg/dist/ into out/ for the demo zip.
+# Copy the runtime parts of pkg/dist/ into demo/out for the demo zip.
 # .d.ts files stay in pkg/dist/ (they ship via the npm tarball instead,
 # which is what TypeScript consumers need).
 stage-pkg:
-    mkdir -p out/pkg/dist/src
-    cp -f pkg/dist/index.js pkg/dist/fbm.js pkg/dist/fbm.wasm out/pkg/dist/
-    cp -f pkg/dist/src/loader.js out/pkg/dist/src/
+    mkdir -p demo/out/warthog-fbm/src
+    cp -f pkg/dist/index.js pkg/dist/fbm.js pkg/dist/fbm.wasm demo/out/warthog-fbm/
+    cp -f pkg/dist/src/loader.js demo/out/warthog-fbm/src/
 
-dev: build-pkg
-    (cd demo && python3 server.py)
+# Dev: serve the demo source tree (live HTML/JS iteration) via a symlink
+# that exposes pkg/dist/ as demo/src/warthog-fbm/. The symlink is
+# gitignored and auto-created on first run.
+dev: build-pkg ensure-dev-symlink
+    (cd demo/src && python3 server.py)
+
+ensure-dev-symlink:
+    [ -L demo/src/warthog-fbm ] || ln -s ../../pkg/dist demo/src/warthog-fbm
 
 run: build
-    (cd out && python3 server.py)
+    (cd demo/out && python3 server.py)
 
 reconfigure:
-    meson setup build-wasm --cross-file=crosscompile/emscripten.txt --reconfigure --prefix=/
+    (cd cpp && meson setup build-wasm --cross-file=crosscompile/emscripten.txt --reconfigure --prefix=/)
 
 clean:
-    rm -rf build-wasm out
+    rm -rf cpp/build-wasm demo/out
 
 # Build the npm package: wasm → tsc → assets. Mirrors CI step 10.
 build-pkg:
@@ -42,12 +52,12 @@ build-pkg:
 clean-pkg:
     cd pkg && rm -rf dist node_modules
 
-# Bump version in meson.build AND pkg/package.json in lockstep, commit,
+# Bump version in cpp/meson.build AND pkg/package.json in lockstep, commit,
 # and tag locally. Push yourself.
 bump part="patch":
     #!/usr/bin/env bash
     set -euo pipefail
-    cur=$(grep -oP "^\s*version\s*:\s*'\K[^']+" meson.build)
+    cur=$(grep -oP "^\s*version\s*:\s*'\K[^']+" cpp/meson.build)
     IFS='.' read -r -a parts <<< "$cur"
     major="${parts[0]:-0}"; minor="${parts[1]:-0}"; patch="${parts[2]:-0}"
     case "{{part}}" in
@@ -57,9 +67,9 @@ bump part="patch":
       *) echo "usage: just bump [major|minor|patch]" >&2; exit 1 ;;
     esac
     new="${major}.${minor}.${patch}"
-    sed -i -E "s/(version\s*:\s*')$cur'/\1${new}'/" meson.build
+    sed -i -E "s/(version\s*:\s*')$cur'/\1${new}'/" cpp/meson.build
     sed -i -E "s/(\"version\"\s*:\s*\")[^\"]+(\")/\1${new}\2/" pkg/package.json
-    git add meson.build pkg/package.json
+    git add cpp/meson.build pkg/package.json
     git commit -m "bump version to ${new}"
     git tag -a "v${new}" -m "Release v${new}"
     echo "Committed and tagged v${new}. Push with:"
@@ -70,7 +80,7 @@ bump part="patch":
 release:
     #!/usr/bin/env bash
     set -euo pipefail
-    v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" meson.build)
+    v=$(grep -oP "^\s*version\s*:\s*'\K[^']+" cpp/meson.build)
     npm_v=$(node -p "require('./pkg/package.json').version")
     if [ "$v" != "$npm_v" ]; then
       echo "Syncing pkg/package.json: ${npm_v} -> ${v}"

@@ -28,12 +28,12 @@
   ],
   "scripts": {
     "build:ts": "tsc -p tsconfig.build.json",
-    "build:wasm": "cd .. && meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/ --reconfigure && meson compile -C build-wasm",
-    "stage": "cp -f ../build-wasm/fbm.js ../build-wasm/fbm.wasm .",
+    "build:wasm": "cd ../cpp && meson setup build-wasm --cross-file=crosscompile/emscripten.txt --prefix=/ --reconfigure && meson compile -C build-wasm",
+    "stage": "cp -f ../cpp/build-wasm/fbm.js ../cpp/build-wasm/fbm.wasm .",
     "publish:assets": "cp -f fbm.js fbm.wasm index.d.ts index.raw.d.ts dist/",
     "build": "npm run build:wasm && npm run stage && npm run build:ts && npm run publish:assets",
     "test": "node --import tsx --test --test-reporter spec tests/*.test.ts",
-    "clean": "rm -rf dist ../build-wasm"
+    "clean": "rm -rf dist ../cpp/build-wasm"
   },
   "devDependencies": {
     "@types/node": "^22",

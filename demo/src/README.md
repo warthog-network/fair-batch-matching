@@ -47,8 +47,9 @@ no manual `Module` step.
 ### Embedding without the package (raw Embind)
 
 If you want to ship the wasm as standalone files (no npm), the raw
-loader pattern is still available. Drop `fbm.js` and `fbm.wasm` next
-to your html:
+loader pattern is still available. Get the raw `fbm.js` and `fbm.wasm`
+files (e.g., from the npm tarball or your local `pkg/dist/` build) and
+drop them next to your html:
 
 ```html
 <script type="module">
@@ -68,18 +69,21 @@ to your html:
 ### Where the demo's import map points
 
 The demo HTML uses a browser-native import map to resolve the package
-name to the locally-built copy at `../pkg/dist/index.js`:
+name to the locally-built copy at `./warthog-fbm/index.js`:
 
 ```html
 <script type="importmap">
 {
   "imports": {
-    "warthog-fbm": "../pkg/dist/index.js"
+    "warthog-fbm": "./warthog-fbm/index.js"
   }
 }
 </script>
 ```
 
+In dev, `demo/src/warthog-fbm` is a gitignored symlink to
+`../../../pkg/dist` (auto-created by `just dev` if missing). In the
+release bundle, it's a real directory with the same files copied in.
 This lets the demo write `import FbmEngine from "warthog-fbm"` (the
 same import a Node.js consumer would write) while serving files
 straight from disk via `python3 server.py`. No bundler, no
