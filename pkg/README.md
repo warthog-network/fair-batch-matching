@@ -22,12 +22,12 @@ const e: Engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
 e.setPool({ base: "100", quote: "200" });
 
 // Add swap orders, amount always specifies refers the swap's input currency
-e.addSell({ price: "1", amount: "10" }); // Swap 10 units of base for quote (sell base) 
-e.addBuy({ price: "1", amount: "5" });   // Swap 5 units of quote for base (buy base)
+e.addSell({ limit: "1", amount: "10" }); // Swap 10 units of base for quote (sell base) 
+e.addBuy({ limit: "1", amount: "5" });   // Swap 5 units of quote for base (buy base)
 
 // Match liquidity pool and orders using Fair Batch Matching
 console.log(e.match()); 
-//=> { buys: [...], sells: [...], matched: { base: "5", quote: "5", price: 1 } }
+//=> { buys: [...], sells: [...], matched: { base: "0", quote: "0", price: null } }
 ```
 
 ### Setting up the Engine
@@ -46,7 +46,9 @@ All operations are performed on an instance of the imported engine.
 const e: Engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
 ```
 - The `baseDecimals` parameter specifies the number of decimal places for the base currency and accepts integers: `0-18`. The default value is `8` if omitted. `baseDecimals` is fixed at construction and cannot be changed for the lifetime of the instance; to use a different decimal count, construct a new `FbmEngine`.
-- The `feeE4` parameter specifies the pool fee that takers pay when interacting with the liquidity pool and accepts integers `0-9999` with default value `5` if omitted. The fee corresponds to this value multiplied by `0.0001%`. In particular, the default value corresponds to `0.05%`. The fee can be changed later using `e.setFee({ E4: 30 });`.
+- The `feeE4` parameter specifies the pool fee that takers pay when interacting with the liquidity pool and accepts integers `0-9999` with default value `5` if omitted. The fee corresponds to this value multiplied by `0.0001%`. In particular, the default value corresponds to `0.05%`. The fee can be changed later using `e.setFeeE4(30);`.
+
+There is no `quoteDecimals` property because we tailored this library to its use case within the Warthog project such that the quote currency is always WART which has hard coded `8` decimal digits.
 
 The configuration can be queried:
 ```ts
@@ -75,37 +77,42 @@ e.getPool();     //=> { base: "100.00000000", quote: "200.00000000" }
 ```
 
 ### Configuring the Order Book
-The order book consists of swap orders with a specific price and amount to be swapped, i.e. the swap's input amount. Note that this is different  is an important difference to traditional order books on centralized exchanges where the amount of a buy order specifies the amount of base currency to be purchased, i.e. the trade's output amount.
+The order book consists of swap orders with a specific limit and amount to be swapped, i.e. the swap's input amount. Note that this is an important difference to traditional order books on centralized exchanges where the amount of a buy order specifies the amount of base currency to be purchased, i.e. the trade's output amount.
 
-#### Adding Orders
+#### Add Orders
 New orders are added as follows:
 ```ts
 // Add swap orders, amount always specifies refers the swap's input currency
-e.addSell({ price: "1", amount: "10" }); // Swap 10 units of base for quote (sell base) 
-e.addBuy({ price: "1", amount: "5" });   // Swap 5 units of quote for base (buy base)
+e.addSell({ limit: "1", amount: "10" }); // Swap 10 units of base for quote (sell base) 
+e.addBuy({ limit: "1", amount: "5" });   // Swap 5 units of quote for base (buy base)
 ```
-Adding multiple orders at the same price results in a single aggregated order with the total amount.
+Adding multiple orders at the same limit results in a single aggregated order with the total amount.
 
 The methods return `{ ok: true }` on success, `{ error: "..." }` on failure. 
-#### Deleting Orders
 
+#### Delete and Lookup Orders
+
+Orders are internally sorted descending by limit, same as returned in the `match()` output below. Delete and look up orders by index:
 ```ts
-e.deleteBuy({ index: 0 });   // first buy
-e.deleteSell({ index: 0 });  // first sell
+e.getBuyAt(0);     // get first buy (highest limit in buys)
+e.deleteBuyAt(0);  // get and delete first buy 
+e.getSellAt(0);    // get first sell (highest limit in sells)
+e.deleteSellAt(0); // get and delete first sell
 ```
 
-Returns `{ ok: true }` on success or `{ error: "..." }` if `index` is missing or out of range. The index refers to the sorted book from the most recent `match()` call (buys DESC, sells ASC); deleting an entry removes the entire merged amount at that price level.
+These methods return the deleted order `Order` (`{ amount, limit }`) on success, or `null` if no order exists at that index. The order's limit is returned as a string.
 
 ### Pre-Validating Input
+
 To pre-validate the string parameters used above, the following validation methods can be used:
 
 ```ts
-e.validatePrice({ price: "1.0" });        // for `price` in `addBuy` and `addSell`
-e.validateBaseAmount({ amount: "5" });    // for `quote` in `setPool` and `amount` in `addBuy`
-e.validateQuoteAmount({ amount: "5" });   // for `base` in `setPool` and `amount` in `addSell`
+e.validateLimit("1.0");           // for `limit` in `addBuy` and `addSell`
+e.validateBaseAmount("5");       // WART amount (8 decimals) — for setPool and addBuy
+e.validateQuoteAmount("5");      // base-token amount (current baseDecimals) — for setPool and addSell
 ```
 
-The calls return `{ ok: true }` on success or `{ error: "..." }` on failure. The amount validators account for the currency's respective number of allowed decimal digits (8 for WART, `baseDecimals` for the base token).
+Each call returns `{ ok: true }` on success or `{ error: "..." }` on failure. The amount validators account for the currency's respective number of allowed decimal digits (8 for WART, `baseDecimals` for the base token).
 
 
 
@@ -119,35 +126,35 @@ Its output has the following structure:
 
 ```ts
 const m: MatchResult = {
-  // Book after matching, sorted (buys DESC, sells ASC).
-  // The array index is what you pass to `deleteBuy` (for buys) or
-  // `deleteSell` (for sells).
-  //   amount = original order size
-  //   filled = how much was consumed
-  //   limit  = the order's limit price (quote per base)
-  buys:  [{ amount: "5.00000000",  filled: "5.00000000",  limit: 1 }],
-  sells: [{ amount: "10.00000000", filled: "5.00000000",  limit: 1 }],
+  // Book after matching, sorted descending by limit.
+  // The array index is what you pass to `deleteBuyAt` (for buys) or
+  // `deleteSellAt` (for sells). Properties:
+  //   amount = swap's original input amount
+  //   filled = how much was consumed by the match
+  //   limit  = the order's limit (quote per base); same field as the add input
+  buys:  [{ amount: "5.00000000",  filled: "0",           limit: "1.000000" }],
+  sells: [{ amount: "10.00000000", filled: "10.00000000", limit: "1.000000" }],
 
-  // Pool reserves at match time. `price` is the spot price quote/base.
+  // Pool reserves before the match. `price` is the spot price quote/base or nil.
   poolBefore: { base: "100.00000000", quote: "200.00000000", price: 2 },
-  poolAfter:  { base: "100.00000000", quote: "100.00000000", price: 1 },
+
+  // Pool reserves after the match.
+  poolAfter:  { base: "110.00000000", quote: "181.82727273", price: 1.6529752066363637 },
 
   // The pool's side of the swap, or null if no swap happened.
-  //   isQuote: true  → pool bought quote (WART) from a seller
-  //                    (base left, quote entered the pool)
-  //   isQuote: false → pool sold quote to a buyer
-  //                    (base entered, quote left the pool)
-  toPool: { isQuote: true, base: "0.00000000", quote: "100.00000000", price: 1 },
+  //   isQuote == true : buyer spent quote on pool to swap into base
+  //   isQuote == false: seller spent base on pool to swap into quote
+  toPool: { isQuote: false, base: "10.00000000", quote: "18.17272727", price: 1.817272727 },
 
-  // Executed legs. `out*` is what that side released, `in*` what it
-  // received, `price*` the executed price. Seller row, then buyer row.
+  // The buyers' and sellers' total swap's input and output
   filled: {
-    outBaseSeller: "5.00000000", inQuoteSeller: "5.00000000", priceSeller: 1,
-    outQuoteBuyer: "5.00000000", inBaseBuyer:   "5.00000000", priceBuyer:  1,
+    outBaseSeller: "10.00000000", inQuoteSeller: "18.17272727", priceSeller: 1.817272727,
+    outQuoteBuyer: "0",           inBaseBuyer:   "0",           priceBuyer:  null,
   },
 
-  // The cleared trade, or null if no orders crossed.
-  matched: { base: "5.00000000", quote: "5.00000000", price: 1 },
+  // The matched direct interaction between buyers and sellers in the 
+  // order book (without the part that goes to the pool)
+  matched: { base: "0", quote: "0", price: null },
 };
 ```
 Matching with an empty pool is supported.

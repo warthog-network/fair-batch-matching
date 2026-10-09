@@ -89,75 +89,113 @@ test("setPool({base: 'ok', quote: 'garbage'}) is atomic — neither changes", as
 
 // ─── Pure-parse validators (no state change) ───────────────────────────
 
-test("validatePrice accepts well-formed input", async () => {
+test("validateLimit accepts well-formed input", async () => {
     const e = await freshEngine();
-    const r = e.validatePrice({ price: "1.5" });
+    const r = e.validateLimit("1.5");
     assert.deepEqual(r, { ok: true });
 });
 
-test("validatePrice rejects missing", async () => {
+test("validateLimit rejects empty", async () => {
     const e = await freshEngine();
-    const r = e.validatePrice({});
+    const r = e.validateLimit("");
     assert.ok("error" in r);
 });
 
-test("validatePrice rejects bad price", async () => {
+test("validateLimit rejects bad limit", async () => {
     const e = await freshEngine();
-    const r = e.validatePrice({ price: "oops" });
+    const r = e.validateLimit("oops");
     assert.ok("error" in r);
 });
 
 test("validateBaseAmount parses WART (8 decimals)", async () => {
     const e = await freshEngine();
-    assert.deepEqual(e.validateBaseAmount({ amount: "100" }), { ok: true });
-    assert.ok("error" in e.validateBaseAmount({ amount: "garbage" }));
+    assert.deepEqual(e.validateBaseAmount("100"), { ok: true });
+    assert.ok("error" in e.validateBaseAmount("garbage"));
 });
 
 test("validateQuoteAmount parses with current baseDecimals", async () => {
     const e = await freshEngine({ baseDecimals: 3 });
-    assert.deepEqual(e.validateQuoteAmount({ amount: "100" }), { ok: true });
-    assert.ok("error" in e.validateQuoteAmount({ amount: "garbage" }));
+    assert.deepEqual(e.validateQuoteAmount("100"), { ok: true });
+    assert.ok("error" in e.validateQuoteAmount("garbage"));
 });
 
 test("validators do NOT mutate state", async () => {
     const e = await freshEngine();
-    e.validatePrice({ price: "1.5" });
-    e.validateBaseAmount({ amount: "100" });
-    e.validateQuoteAmount({ amount: "50" });
+    e.validateLimit("1.5");
+    e.validateBaseAmount("100");
+    e.validateQuoteAmount("50");
     assert.equal(e.match().buys.length, 0);
     assert.equal(e.match().sells.length, 0);
+});
+
+// ─── setFeeE4 ────────────────────────────────────────────────────────────
+
+test("setFeeE4 accepts valid range", async () => {
+    const e = await freshEngine();
+    const r = e.setFeeE4(30);
+    assert.deepEqual(r, { ok: true });
+    assert.equal(e.getConfig().feeE4, 30);
+});
+
+test("setFeeE4 rejects out-of-range", async () => {
+    const e = await freshEngine();
+    const r = e.setFeeE4(10000);
+    assert.ok("error" in r);
+    assert.equal(e.getConfig().feeE4, 5); // unchanged
 });
 
 // ─── Order deletion ──────────────────────────────────────────────────────
 
-test("deleteBuy removes from buys, leaves sells alone", async () => {
+test("deleteBuyAt returns the deleted order", async () => {
     const e = await freshEngine({ baseDecimals: 3 });
     e.setPool({ base: "100", quote: "200" });
-    e.addBuy({ price: "1", amount: "5" });
-    e.addBuy({ price: "1", amount: "3" });   // merges with previous at price 1
-    e.addSell({ price: "2", amount: "4" });
+    e.addBuy({ limit: "1", amount: "5" });
+    e.addBuy({ limit: "1", amount: "3" });   // merges with previous at limit 1
+    e.addSell({ limit: "2", amount: "4" });
     assert.equal(e.match().buys.length, 1);
     assert.equal(e.match().sells.length, 1);
 
-    const r = e.deleteBuy({ index: 0 });
-    assert.deepEqual(r, { ok: true });
+    const r = e.deleteBuyAt(0);
+    assert.deepEqual(r, { amount: "8.00000000", limit: "1.000000" });
     assert.equal(e.match().buys.length, 0);
     assert.equal(e.match().sells.length, 1);
 });
 
-test("deleteSell removes from sells, leaves buys alone", async () => {
+test("deleteSellAt returns the deleted order", async () => {
     const e = await freshEngine({ baseDecimals: 3 });
     e.setPool({ base: "100", quote: "200" });
-    e.addBuy({ price: "2", amount: "5" });
-    e.addSell({ price: "1", amount: "5" });
-    e.addSell({ price: "1", amount: "3" });  // merges with previous at price 1
+    e.addBuy({ limit: "2", amount: "5" });
+    e.addSell({ limit: "1", amount: "5" });
+    e.addSell({ limit: "1", amount: "3" });  // merges with previous at limit 1
     assert.equal(e.match().buys.length, 1);
     assert.equal(e.match().sells.length, 1);
 
-    const r = e.deleteSell({ index: 0 });
-    assert.deepEqual(r, { ok: true });
+    const r = e.deleteSellAt(0);
+    assert.deepEqual(r, { amount: "8.000", limit: "1.000000" });
     assert.equal(e.match().buys.length, 1);
     assert.equal(e.match().sells.length, 0);
+});
+
+// ─── Per-order lookup (getBuyAt, getSellAt) ────────────────────────────
+
+test("getBuyAt returns the order at the given index", async () => {
+    const e = await freshEngine({ baseDecimals: 3 });
+    e.setPool({ base: "100", quote: "200" });
+    e.addBuy({ limit: "1", amount: "5" });
+    e.addBuy({ limit: "2", amount: "3" });
+    const got = e.getBuyAt(0);
+    // buys[0] is the highest-limit buy (DESC), so limit=2 comes first
+    assert.deepEqual(got, { amount: "3.00000000", limit: "2.000000" });
+});
+
+test("getSellAt returns the highest-limit sell first", async () => {
+    const e = await freshEngine({ baseDecimals: 3 });
+    e.setPool({ base: "100", quote: "200" });
+    e.addSell({ limit: "1", amount: "5" });
+    e.addSell({ limit: "2", amount: "3" });
+    const got = e.getSellAt(0);
+    // sells[0] is the highest-limit sell (DESC), so limit=2 comes first
+    assert.deepEqual(got, { amount: "3.000", limit: "2.000000" });
 });
 
 // ─── Match ──────────────────────────────────────────────────────────────
@@ -185,29 +223,29 @@ test("match() on (0,0) pool with no orders keeps pool untouched", async () => {
 test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
     const e = await freshEngine({ baseDecimals: 3, feeE4: 10 });
     e.setPool({ base: "1000", quote: "5000" }); // pool price = 5 WART/token
-    e.addSell({ price: "3", amount: "100" }); // below pool — routes to pool
-    e.addSell({ price: "4", amount: "200" }); // at pool — routes to pool
-    e.addSell({ price: "7", amount: "300" }); // above pool — needs buyer at 7+
-    e.addBuy({ price: "4", amount: "400" }); // below pool price — no counterparty
-    e.addBuy({ price: "6", amount: "600" }); // matches sells at 7
-    e.addBuy({ price: "8", amount: "800" }); // matches sells at 7 fully, then via pool
+    e.addSell({ limit: "3", amount: "100" }); // below pool — routes to pool
+    e.addSell({ limit: "4", amount: "200" }); // at pool — routes to pool
+    e.addSell({ limit: "7", amount: "300" }); // above pool — needs buyer at 7+
+    e.addBuy({ limit: "4", amount: "400" }); // below pool price — no counterparty
+    e.addBuy({ limit: "6", amount: "600" }); // matches sells at 7
+    e.addBuy({ limit: "8", amount: "800" }); // matches sells at 7 fully, then via pool
     const m = e.match();
     assert.deepEqual(m, {
         buys: [
             {
                 amount: "800.00000000",
                 filled: "800.00000000",
-                limit: 8,
+                limit: "8.000000",
             },
             {
                 amount: "600.00000000",
                 filled: "600.00000000",
-                limit: 6.000000000000001,
+                limit: "6.000000",
             },
             {
                 amount: "400.00000000",
                 filled: "0",
-                limit: 4,
+                limit: "4.000000",
             },
         ],
         filled: {
@@ -237,17 +275,17 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             {
                 amount: "300.000",
                 filled: "0",
-                limit: 7.000000000000001,
+                limit: "7.000000",
             },
             {
                 amount: "200.000",
                 filled: "200.000",
-                limit: 4,
+                limit: "4.000000",
             },
             {
                 amount: "100.000",
                 filled: "100.000",
-                limit: 3.0000000000000004,
+                limit: "3.000000",
             },
         ],
         toPool: {

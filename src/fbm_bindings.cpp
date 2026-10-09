@@ -122,15 +122,15 @@ class FbmEngine {
 private:
     // Parses a buy/sell order. `decimals` selects the token-decimal count
     // for the amount field: WART (8 dp) for buy orders, baseDecimals_
-    // for sell orders. The price is parsed with `from_string_adjusted`
+    // for sell orders. The limit is parsed with `from_string_adjusted`
     // (not `from_string`) so the stored mantissa+exponent accounts for
     // the WART-vs-baseToken precision difference. Without `_adjusted`,
     // the stored value would round-trip through `to_double_adjusted`
     // as a tiny number (~0.00005) instead of the user-entered value (5).
     defi::Order_uint64 parse_order(emval v, TokenDecimals decimals)
     {
-        if (v["price"].isUndefined())
-            throw std::runtime_error("Missing 'price' field");
+        if (v["limit"].isUndefined())
+            throw std::runtime_error("Missing 'limit' field");
         if (v["amount"].isUndefined())
             throw std::runtime_error("Missing 'amount' field");
         Funds_uint64 amount { [&]() {
@@ -144,9 +144,9 @@ private:
         }() };
         Price_uint64 price { [&]() {
             try {
-                return Price_uint64::from_string_adjusted(v["price"].as<std::string>(), baseDecimals_).value();
+                return Price_uint64::from_string_adjusted(v["limit"].as<std::string>(), baseDecimals_).value();
             } catch (...) {
-                throw std::runtime_error("Cannot get price");
+                throw std::runtime_error("Cannot get limit");
             }
         }() };
         return { amount, price };
@@ -239,17 +239,12 @@ public:
         return make_ok();
     }
 
-    emval setFee(emval v)
+    emval setFeeE4(long e4)
     {
-        if (v["E4"].isUndefined()) {
-            return make_error("setFee: missing 'E4' field");
+        if (e4 < 0 || e4 > 9999) {
+            return make_error("setFeeE4: 'e4' must be an integer in 0..9999");
         }
-        long fee { 0 };
-        if (auto err = parse_strict_int_field(v, "E4", 0, 9999, &fee);
-            !err.isNull()) {
-            return err;
-        }
-        feeE4_ = static_cast<uint32_t>(fee);
+        feeE4_ = static_cast<uint32_t>(e4);
         return make_ok();
     }
 
@@ -279,73 +274,51 @@ public:
         return make_ok();
     }
 
-    emval deleteBuy(emval v)
+    emval deleteBuyAt(long index)
     {
-        if (v["index"].isUndefined()) {
-            return make_error("deleteBuy: missing 'index'");
+        if (index < 0 || static_cast<size_t>(index) >= bso_.quote_desc_buy().size()) {
+            return emval::null();
         }
-        try {
-            bso_.delete_quote(v["index"].as<size_t>());
-        } catch (...) {
-            return make_error("deleteBuy: 'index' must be a non-negative integer");
-        }
-        return make_ok();
+        // Copy the order before deleting — the reference would be
+        // invalidated by the delete.
+        defi::Order_uint64 order { bso_.quote_desc_buy()[static_cast<size_t>(index)] };
+        bso_.delete_quote(static_cast<size_t>(index));
+        return make_order(order, /*is_buy=*/true);
     }
 
-    emval deleteSell(emval v)
+    emval deleteSellAt(long index)
     {
-        if (v["index"].isUndefined()) {
-            return make_error("deleteSell: missing 'index'");
+        if (index < 0 || static_cast<size_t>(index) >= bso_.base_asc_sell().size()) {
+            return emval::null();
         }
-        try {
-            bso_.delete_base(v["index"].as<size_t>());
-        } catch (...) {
-            return make_error("deleteSell: 'index' must be a non-negative integer");
-        }
-        return make_ok();
+        // Sells are exposed in DESC order (most expensive first);
+        // bso_.base_asc_sell() is ASC, so reverse the index.
+        const size_t real { bso_.base_asc_sell().size() - 1 - static_cast<size_t>(index) };
+        defi::Order_uint64 order { bso_.base_asc_sell()[real] };
+        bso_.delete_base(static_cast<size_t>(index));
+        return make_order(order, /*is_buy=*/false);
     }
 
     // ─── Pure-parse validators (no state change) ──────────────────────
 
-    emval validatePrice(emval v)
+    emval validateLimit(std::string s)
     {
-        if (v["price"].isUndefined())
-            return make_error("Missing 'price' field");
-        try {
-            std::string s { v["price"].as<std::string>() };
-            if (!Price_uint64::from_string_adjusted(s, baseDecimals_).has_value())
-                return make_error("Cannot parse price");
-        } catch (...) {
-            return make_error("Cannot parse price");
-        }
+        if (!Price_uint64::from_string_adjusted(s, baseDecimals_).has_value())
+            return make_error("Cannot parse limit");
         return make_ok();
     }
 
-    emval validateBaseAmount(emval v)
+    emval validateBaseAmount(std::string s)
     {
-        if (v["amount"].isUndefined())
-            return make_error("Missing 'amount' field");
-        try {
-            std::string s { v["amount"].as<std::string>() };
-            if (!Funds_uint64::parse(s, TokenDecimals::WART).has_value())
-                return make_error("Cannot parse amount");
-        } catch (...) {
+        if (!Funds_uint64::parse(s, TokenDecimals::WART).has_value())
             return make_error("Cannot parse amount");
-        }
         return make_ok();
     }
 
-    emval validateQuoteAmount(emval v)
+    emval validateQuoteAmount(std::string s)
     {
-        if (v["amount"].isUndefined())
-            return make_error("Missing 'amount' field");
-        try {
-            std::string s { v["amount"].as<std::string>() };
-            if (!Funds_uint64::parse(s, baseDecimals_).has_value())
-                return make_error("Cannot parse amount");
-        } catch (...) {
+        if (!Funds_uint64::parse(s, baseDecimals_).has_value())
             return make_error("Cannot parse amount");
-        }
         return make_ok();
     }
 
@@ -365,6 +338,24 @@ public:
         obj.set("base", emval(poolToken_.to_decimal(baseDecimals_).to_string()));
         obj.set("quote", emval(poolWart_.as_wart().to_string()));
         return obj;
+    }
+
+    emval getBuyAt(long index) const
+    {
+        if (index < 0 || static_cast<size_t>(index) >= bso_.quote_desc_buy().size()) {
+            return emval::null();
+        }
+        return make_order(bso_.quote_desc_buy()[static_cast<size_t>(index)], /*is_buy=*/true);
+    }
+
+    emval getSellAt(long index) const
+    {
+        if (index < 0 || static_cast<size_t>(index) >= bso_.base_asc_sell().size()) {
+            return emval::null();
+        }
+        // Sells are exposed in DESC order; bso_.base_asc_sell() is ASC.
+        const size_t real { bso_.base_asc_sell().size() - 1 - static_cast<size_t>(index) };
+        return make_order(bso_.base_asc_sell()[real], /*is_buy=*/false);
     }
 
     // ─── Match ────────────────────────────────────────────────────────────
@@ -391,6 +382,22 @@ private:
         return obj;
     }
 
+    // Formats an Order_uint64 as the unified `{ amount, limit }` JS
+    // object. `is_buy` controls the amount's decimal formatting: WART
+    // (8 dp) for buys, `baseDecimals` for sells. The limit is rendered
+    // as a decimal string via `std::to_string(to_double_adjusted(...))`,
+    // which gives at least 6 significant digits — sufficient for FBM
+    // limits (mantissa precision is 16 bits, well within double range).
+    emval make_order(const defi::Order_uint64& order, bool is_buy) const
+    {
+        emval obj = emval::object();
+        obj.set("amount", is_buy
+            ? emval(order.amount.as_wart().to_string())
+            : emval(order.amount.to_decimal(baseDecimals_).to_string()));
+        obj.set("limit", emval(std::to_string(order.limit.to_double_adjusted(baseDecimals_))));
+        return obj;
+    }
+
     emval compute_match() const
     {
         const defi::PoolLiquidity_uint64 p { poolToken_, poolWart_ };
@@ -403,10 +410,8 @@ private:
             auto order { bso_.quote_desc_buy()[i] };
             auto filled { std::min(order.amount, fquote) };
             fquote.subtract_assert(filled);
-            emval row = emval::object();
-            row.set("amount", emval(order.amount.as_wart().to_string()));
+            emval row = make_order(order, /*is_buy=*/true);
             row.set("filled", emval(filled.as_wart().to_string()));
-            row.set("limit", emval(order.limit.to_double_adjusted(baseDecimals_)));
             buys.call<void>("push", row);
         }
 
@@ -417,10 +422,8 @@ private:
             auto order { bso_.base_asc_sell()[j] };
             auto filled { std::min(fbase, order.amount) };
             fbase.subtract_assert(filled);
-            emval row = emval::object();
-            row.set("amount", emval(order.amount.to_decimal(baseDecimals_).to_string()));
+            emval row = make_order(order, /*is_buy=*/false);
             row.set("filled", emval(filled.to_decimal(baseDecimals_).to_string()));
-            row.set("limit", emval(order.limit.to_double_adjusted(baseDecimals_)));
             sells.call<void>("push", row);
         }
         sells.call<void>("reverse");
@@ -514,15 +517,17 @@ EMSCRIPTEN_BINDINGS(fbm)
     emscripten::class_<FbmEngine>("FbmEngine")
         .constructor<emscripten::val>()
         .function("setPool", &FbmEngine::setPool)
-        .function("setFee", &FbmEngine::setFee)
+        .function("setFeeE4", &FbmEngine::setFeeE4)
         .function("addBuy", &FbmEngine::addBuy)
         .function("addSell", &FbmEngine::addSell)
-        .function("deleteBuy", &FbmEngine::deleteBuy)
-        .function("deleteSell", &FbmEngine::deleteSell)
-        .function("validatePrice", &FbmEngine::validatePrice)
+        .function("deleteBuyAt", &FbmEngine::deleteBuyAt)
+        .function("deleteSellAt", &FbmEngine::deleteSellAt)
+        .function("validateLimit", &FbmEngine::validateLimit)
         .function("validateBaseAmount", &FbmEngine::validateBaseAmount)
         .function("validateQuoteAmount", &FbmEngine::validateQuoteAmount)
         .function("getConfig", &FbmEngine::getConfig)
         .function("getPool", &FbmEngine::getPool)
+        .function("getBuyAt", &FbmEngine::getBuyAt)
+        .function("getSellAt", &FbmEngine::getSellAt)
         .function("match", &FbmEngine::match);
 }

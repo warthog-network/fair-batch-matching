@@ -31,10 +31,9 @@ that returns the wasm `Module` object. The `FbmEngine` class lives on
 <script type="module">
     import init from "./fbm.js";
     const Module = await init();
-    // Pool reserves default to (0, 0) until you call setPoolBase / setPoolQuote.
+    // Pool reserves default to (0, 0) until you call setPool.
     const engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 5 });
-    engine.setPoolBase({ value: "100" });
-    engine.setPoolQuote({ value: "200" });
+    engine.setPool({ base: "100", quote: "200" });
     const m = engine.match();
     console.log(m.matched.price);
 </script>
@@ -53,40 +52,37 @@ fee, and baseDecimals. Multiple instances share the same wasm module.
 
 ### Mutators — return `{ ok }` or `{ error }`
 
-| Method | Input | Side effects |
+| Method | Input | Side effects / return |
 |---|---|---|
-| `setPoolBase` | `{ value: string }` | updates `poolToken` only on parse success; failure leaves prior value |
-| `setPoolQuote` | `{ value: string }` | updates `poolWart` only on parse success; failure leaves prior value |
-| `setFee` | `{ E4: number }` (0–9999) | updates `feeE4` only on parse success; failure leaves prior value |
-| `addBuy` | `{ price: string, amount: string }` (WART) | inserts buy order |
-| `addSell` | `{ price: string, amount: string }` (TOKEN) | inserts sell order |
-| `deleteBuy` | `{ index: number }` | removes one buy order |
-| `deleteSell` | `{ index: number }` | removes one sell order |
-| `validatePrice` | `{ price: string }` | parses price only, **no state change**; use for live field validation |
-| `validateBaseAmount` | `{ amount: string }` (WART, 8 dp) | parses buy amount only, **no state change** |
-| `validateQuoteAmount` | `{ amount: string }` (TOKEN) | parses sell amount with current `baseDecimals`, **no state change** |
-| `reset` | no arg, or `{ baseDecimals?, feeE4? }` (both optional) | clears book + zeros pool, optionally updates config. **Missing keys preserve current value**, they do not revert to defaults. **No-arg form clears without changing config**. **Atomic**: if any provided field is invalid, the whole call is rejected and book / pool / config are left untouched. |
+| `setPool` | `{ base?: string, quote?: string }` (both optional) | updates pool reserves. **Missing keys preserve current value**. **Atomic**: if any provided field is invalid, the whole call is rejected and neither reserve changes. |
+| `setFeeE4` | `number` (0–9999, basis points) | updates `feeE4` only on range check; failure leaves prior value |
+| `addBuy` | `Order` (`{ limit, amount }`, amount in WART) | inserts buy order |
+| `addSell` | `Order` (`{ limit, amount }`, amount in base token) | inserts sell order |
+| `deleteBuyAt` | `number` (index) | returns the deleted `Order`, or `null` if not found |
+| `deleteSellAt` | `number` (index) | returns the deleted `Order`, or `null` if not found |
+| `getBuyAt` | `number` (index) | returns the `Order`, or `null` if not found. Does not mutate. |
+| `getSellAt` | `number` (index) | returns the `Order`, or `null` if not found. Does not mutate. |
+| `validateLimit` | `string` | parses limit only, **no state change**; use for live field validation |
+| `validateBaseAmount` | `string` (WART, 8 dp) | parses buy amount only, **no state change** |
+| `validateQuoteAmount` | `string` (TOKEN) | parses sell amount with current `baseDecimals`, **no state change** |
 
 ### Match — explicit
 
 | Method | Return |
 |---|---|
-| `match()` | full `MatchResult` object — never null. `match().buys` / `match().sells` carry `{ amount, filled, limit }` per row. |
+| `match()` | full `MatchResult` object — never null. `match().buys` / `match().sells` carry `{ amount, filled, limit }` per row (same shape as the add input plus the matched fill). |
 
 ### Getters
 
 | Method | Return |
 |---|---|
 | `getConfig()` | `{ baseDecimals: number, feeE4: number }` |
-| `getPoolBase()` | `string` formatted with current `baseDecimals` (defaults to `"0"` formatted with `baseDecimals=8`) |
-| `getPoolQuote()` | `string` (WART, 8 decimals; defaults to `"0.00000000"`) |
-
-> Note: `getPoolBase()` / `getPoolQuote()` return `"0"` (not `"0.00000000"`) for an unconfigured pool. The underlying `FundsDecimal::to_string` short-circuits zero values.
+| `getPool()` | `{ base: string, quote: string }` (formatted with current decimals; defaults to `{ base: "0", quote: "0" }` for an unconfigured pool) |
 
 ## Demo state model
 
 The demo tracks field validity on the JS side (not the engine side).
-For each input — pool base, pool quote, fee, buy/sell price, buy/sell
+For each input — pool base, pool quote, fee, buy/sell limit, buy/sell
 amount — the demo tracks:
 
 - the current `value` the user typed
@@ -106,9 +102,9 @@ Two important invariants in the demo:
    index directly into the engine's book — there's no parallel state to
    keep in sync.
 
-Live field validation: as the user types in `buyPrice` /
-`buyAmount` / `sellPrice` / `sellAmount`, the demo calls
-`engine.validatePrice` / `validateBaseAmount` / `validateQuoteAmount`
+Live field validation: as the user types in `buyLimit` /
+`buyAmount` / `sellLimit` / `sellAmount`, the demo calls
+`engine.validateLimit` / `validateBaseAmount` / `validateQuoteAmount`
 on every input event. Each method returns `{ ok }` / `{ error }`
 without touching engine state. The "Add buy" / "Add sell" buttons are
 disabled until their two respective fields and the pool reserves are

@@ -13,47 +13,27 @@ export interface FbmConfig {
     feeE4?: number;
 }
 
+/* ---------- Order type ---------- */
+
+/**
+ * A single order in the book. Same shape for buys and sells, same shape
+ * whether passed to `addBuy` / `addSell` or returned by `getBuyAt` /
+ * `getSellAt` / `deleteBuyAt` / `deleteSellAt`. The `amount` is formatted
+ * in the order's own decimals: WART (8 dp) for buys, `baseDecimals` for
+ * sells. The `limit` is the canonical decimal form.
+ */
+export interface Order {
+    amount: string;
+    limit: string;
+}
+
 /* ---------- Input interfaces ---------- */
-
-export interface AddBuyInput {
-    price: string;
-    amount: string;
-}
-
-export interface AddSellInput {
-    price: string;
-    amount: string;
-}
 
 export interface SetPoolInput {
     /** Base token amount (decimals = `baseDecimals`). Missing = preserve current. */
     base?: string;
     /** WART amount (8 decimals). Missing = preserve current. */
     quote?: string;
-}
-
-export interface SetFeeInput {
-    E4: number;
-}
-
-export interface DeleteBuyInput {
-    index: number;
-}
-
-export interface DeleteSellInput {
-    index: number;
-}
-
-export interface ValidatePriceInput {
-    price: string;
-}
-
-export interface ValidateBaseAmountInput {
-    amount: string;
-}
-
-export interface ValidateQuoteAmountInput {
-    amount: string;
 }
 
 /* ---------- Mutator responses ---------- */
@@ -70,17 +50,7 @@ export type MutatorResult = OkResponse | ErrorResponse;
 
 /* ---------- Match result ---------- */
 
-export interface BuyResult {
-    amount: string;
-    filled: string;
-    limit: number;
-}
-
-export interface SellResult {
-    amount: string;
-    filled: string;
-    limit: number;
-}
+export type MatchedOrder = Order & { filled: string };
 
 export interface PoolSnapshot {
     base: string;
@@ -111,8 +81,8 @@ export interface Matched {
 }
 
 export interface MatchResult {
-    buys: BuyResult[];
-    sells: SellResult[];
+    buys: MatchedOrder[];
+    sells: MatchedOrder[];
     poolBefore: PoolSnapshot;
     poolAfter: PoolSnapshot;
     toPool: ToPool | null;
@@ -147,8 +117,8 @@ type RawFbmEngineInstance = InstanceType<MainModule["FbmEngine"]>;
  * engine deliberately omits a `setBaseDecimals` method —
  * `baseDecimals` is fixed at construction.
  *
- * **Mutators** (`setPool`, `setFee`, `addBuy`, `addSell`,
- * `deleteBuy`, `deleteSell`) return `{ ok }` or `{ error }` and
+ * **Mutators** (`setPool`, `setFeeE4`, `addBuy`, `addSell`,
+ * `deleteBuyAt`, `deleteSellAt`) return `{ ok }` or `{ error }` and
  * never trigger a match. **Matching is explicit** — call
  * `engine.match()` whenever you want a fresh `MatchResult`. The
  * engine itself never returns null from `match()`; a `(0, 0)` pool
@@ -157,16 +127,18 @@ type RawFbmEngineInstance = InstanceType<MainModule["FbmEngine"]>;
 export type FbmEngine = Omit<
     RawFbmEngineInstance,
     | "setPool"
-    | "setFee"
+    | "setFeeE4"
     | "addBuy"
     | "addSell"
-    | "deleteBuy"
-    | "deleteSell"
-    | "validatePrice"
+    | "deleteBuyAt"
+    | "deleteSellAt"
+    | "validateLimit"
     | "validateBaseAmount"
     | "validateQuoteAmount"
     | "getConfig"
     | "getPool"
+    | "getBuyAt"
+    | "getSellAt"
     | "match"
 > & {
     /**
@@ -178,21 +150,48 @@ export type FbmEngine = Omit<
      * call is rejected and neither reserve changes.
      */
     setPool(input: SetPoolInput): MutatorResult;
-    setFee(input: SetFeeInput): MutatorResult;
-    addBuy(input: AddBuyInput): MutatorResult;
-    addSell(input: AddSellInput): MutatorResult;
-    deleteBuy(input: DeleteBuyInput): MutatorResult;
-    deleteSell(input: DeleteSellInput): MutatorResult;
+    /** Sets the pool fee in 1/10000 units (basis points), 0..9999. */
+    setFeeE4(e4: number): MutatorResult;
+    addBuy(input: Order): MutatorResult;
+    addSell(input: Order): MutatorResult;
+    /**
+     * Removes the buy order at the given `index` (from the most recent
+     * `match().buys`). Returns the deleted `Order` (the same shape as
+     * the add input) or `null` if no order is found at that index.
+     */
+    deleteBuyAt(index: number): Order | null;
+    /**
+     * Removes the sell order at the given `index` (from the most recent
+     * `match().sells`). Returns the deleted `Order` (the same shape as
+     * the add input) or `null` if no order is found at that index.
+     */
+    deleteSellAt(index: number): Order | null;
     /**
      * Pure-parse validators. Return `{ ok }` if the input is valid, or
      * `{ error }` describing why not. **No state is mutated** — these
      * are safe to call from `oninput` listeners for live feedback.
      */
-    validatePrice(input: ValidatePriceInput): MutatorResult;
-    validateBaseAmount(input: ValidateBaseAmountInput): MutatorResult;
-    validateQuoteAmount(input: ValidateQuoteAmountInput): MutatorResult;
+    validateLimit(limit: string): MutatorResult;
+    /** Validates a WART amount (8 decimals). Used by `addBuy` and `setPool`. */
+    validateBaseAmount(amount: string): MutatorResult;
+    /** Validates a base-token amount (current `baseDecimals`). Used by `addSell` and `setPool`. */
+    validateQuoteAmount(amount: string): MutatorResult;
     getConfig(): FbmEngineConfig;
     getPool(): { base: string; quote: string };
+    /**
+     * Returns the buy order at the given `index` (from the most recent
+     * `match().buys`). The returned `Order` has `filled: "0"` because
+     * no match has been run (or the last match state is not retained).
+     * Returns `null` if no order is found at that index.
+     */
+    getBuyAt(index: number): Order | null;
+    /**
+     * Returns the sell order at the given `index` (from the most recent
+     * `match().sells`). The returned `Order` has `filled: "0"` because
+     * no match has been run (or the last match state is not retained).
+     * Returns `null` if no order is found at that index.
+     */
+    getSellAt(index: number): Order | null;
     match(): MatchResult;
 };
 

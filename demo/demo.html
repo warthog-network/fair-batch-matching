@@ -33,13 +33,12 @@
             <h2>Settings</h2>
             <label>Fee (E4, 0–9999): <input id="feeE4" type="number" value="5" min="0" max="9999"></label>
             <p class="error-note" id="feeE4Error"></p>
-            <button id="resetButton">Reset (clears book + pool)</button>
         </section>
 
         <section>
             <h2>Add Buy (spend WART to buy TOKEN)</h2>
-            <label>Price: <input id="buyPrice" type="text" value="1.0"></label>
-            <p class="error-note" id="buyPriceError"></p>
+            <label>Limit: <input id="buyLimit" type="text" value="1.0"></label>
+            <p class="error-note" id="buyLimitError"></p>
             <label>Amount (WART): <input id="buyAmount" type="text"></label>
             <p class="error-note" id="buyAmountError"></p>
             <button id="addBuyButton" disabled>Add buy</button>
@@ -48,8 +47,8 @@
 
         <section>
             <h2>Add Sell (sell TOKEN for WART)</h2>
-            <label>Price: <input id="sellPrice" type="text" value="1.0"></label>
-            <p class="error-note" id="sellPriceError"></p>
+            <label>Limit: <input id="sellLimit" type="text" value="1.0"></label>
+            <p class="error-note" id="sellLimitError"></p>
             <label>Amount (TOKEN): <input id="sellAmount" type="text"></label>
             <p class="error-note" id="sellAmountError"></p>
             <button id="addSellButton" disabled>Add sell</button>
@@ -104,9 +103,9 @@
                 poolBase:        { valid: false, error: "" },
                 poolQuote:       { valid: false, error: "" },
                 feeE4:           { valid: true,  error: "" },
-                buyPrice:        { valid: false, error: "" },
+                buyLimit:        { valid: false, error: "" },
                 buyAmount:       { valid: false, error: "" },
-                sellPrice:       { valid: false, error: "" },
+                sellLimit:       { valid: false, error: "" },
                 sellAmount:      { valid: false, error: "" },
                 lastMatch: null,
             };
@@ -119,14 +118,14 @@
             const poolQuoteError  = $("poolQuoteError");
             const feeE4El         = $("feeE4");
             const feeE4Error      = $("feeE4Error");
-            const buyPriceEl      = $("buyPrice");
+            const buyLimitEl      = $("buyLimit");
             const buyAmountEl     = $("buyAmount");
-            const buyPriceError   = $("buyPriceError");
+            const buyLimitError   = $("buyLimitError");
             const buyAmountError  = $("buyAmountError");
             const buyError        = $("buyError");
-            const sellPriceEl     = $("sellPrice");
+            const sellLimitEl     = $("sellLimit");
             const sellAmountEl    = $("sellAmount");
-            const sellPriceError  = $("sellPriceError");
+            const sellLimitError  = $("sellLimitError");
             const sellAmountError = $("sellAmountError");
             const sellError       = $("sellError");
             const tbodySell       = $("tbodySell");
@@ -205,18 +204,18 @@
             // ─── Button gating ────────────────────────────────────────────────
             function updateBuyButton() {
                 const ready = state.poolBase.valid && state.poolQuote.valid
-                    && state.buyPrice.valid && state.buyAmount.valid;
+                    && state.buyLimit.valid && state.buyAmount.valid;
                 addBuyButton.disabled = !ready;
             }
             function updateSellButton() {
                 const ready = state.poolBase.valid && state.poolQuote.valid
-                    && state.sellPrice.valid && state.sellAmount.valid;
+                    && state.sellLimit.valid && state.sellAmount.valid;
                 addSellButton.disabled = !ready;
             }
 
             // ─── Input handlers ───────────────────────────────────────────────
             poolBaseEl.addEventListener("input", () => {
-                const res = engine.setPoolBase({ value: poolBaseEl.value });
+                const res = engine.setPool({ base: poolBaseEl.value });
                 state.poolBase.valid = "ok" in res;
                 state.poolBase.error = "error" in res ? res.error : "";
                 renderField(poolBaseEl, poolBaseError, state.poolBase);
@@ -225,7 +224,7 @@
                 updateSellButton();
             });
             poolQuoteEl.addEventListener("input", () => {
-                const res = engine.setPoolQuote({ value: poolQuoteEl.value });
+                const res = engine.setPool({ quote: poolQuoteEl.value });
                 state.poolQuote.valid = "ok" in res;
                 state.poolQuote.error = "error" in res ? res.error : "";
                 renderField(poolQuoteEl, poolQuoteError, state.poolQuote);
@@ -239,7 +238,7 @@
                     state.feeE4.valid = false;
                     state.feeE4.error = "must be an integer";
                 } else {
-                    const res = engine.setFee({ E4: n });
+                    const res = engine.setFeeE4(n);
                     state.feeE4.valid = "ok" in res;
                     state.feeE4.error = "error" in res ? res.error : "";
                 }
@@ -247,29 +246,29 @@
                 tryMatch();
             });
 
-            buyPriceEl.addEventListener("input", () => {
-                const res = engine.validatePrice({ price: buyPriceEl.value });
-                state.buyPrice.valid = "ok" in res;
-                state.buyPrice.error = "error" in res ? res.error : "";
-                renderField(buyPriceEl, buyPriceError, state.buyPrice);
+            buyLimitEl.addEventListener("input", () => {
+                const res = engine.validateLimit(buyLimitEl.value);
+                state.buyLimit.valid = "ok" in res;
+                state.buyLimit.error = "error" in res ? res.error : "";
+                renderField(buyLimitEl, buyLimitError, state.buyLimit);
                 updateBuyButton();
             });
             buyAmountEl.addEventListener("input", () => {
-                const res = engine.validateBaseAmount({ amount: buyAmountEl.value });
+                const res = engine.validateBaseAmount(buyAmountEl.value);
                 state.buyAmount.valid = "ok" in res;
                 state.buyAmount.error = "error" in res ? res.error : "";
                 renderField(buyAmountEl, buyAmountError, state.buyAmount);
                 updateBuyButton();
             });
-            sellPriceEl.addEventListener("input", () => {
-                const res = engine.validatePrice({ price: sellPriceEl.value });
-                state.sellPrice.valid = "ok" in res;
-                state.sellPrice.error = "error" in res ? res.error : "";
-                renderField(sellPriceEl, sellPriceError, state.sellPrice);
+            sellLimitEl.addEventListener("input", () => {
+                const res = engine.validateLimit(sellLimitEl.value);
+                state.sellLimit.valid = "ok" in res;
+                state.sellLimit.error = "error" in res ? res.error : "";
+                renderField(sellLimitEl, sellLimitError, state.sellLimit);
                 updateSellButton();
             });
             sellAmountEl.addEventListener("input", () => {
-                const res = engine.validateQuoteAmount({ amount: sellAmountEl.value });
+                const res = engine.validateQuoteAmount(sellAmountEl.value);
                 state.sellAmount.valid = "ok" in res;
                 state.sellAmount.error = "error" in res ? res.error : "";
                 renderField(sellAmountEl, sellAmountError, state.sellAmount);
@@ -278,15 +277,15 @@
 
             addBuyButton.addEventListener("click", () => {
                 const res = engine.addBuy({
-                    price: buyPriceEl.value,
+                    limit: buyLimitEl.value,
                     amount: buyAmountEl.value,
                 });
                 if ("ok" in res) {
-                    buyPriceEl.value = "";
+                    buyLimitEl.value = "";
                     buyAmountEl.value = "";
-                    state.buyPrice = { valid: false, error: "" };
+                    state.buyLimit = { valid: false, error: "" };
                     state.buyAmount = { valid: false, error: "" };
-                    renderField(buyPriceEl, buyPriceError, state.buyPrice);
+                    renderField(buyLimitEl, buyLimitError, state.buyLimit);
                     renderField(buyAmountEl, buyAmountError, state.buyAmount);
                     buyError.textContent = "";
                     updateBuyButton();
@@ -297,15 +296,15 @@
             });
             addSellButton.addEventListener("click", () => {
                 const res = engine.addSell({
-                    price: sellPriceEl.value,
+                    limit: sellLimitEl.value,
                     amount: sellAmountEl.value,
                 });
                 if ("ok" in res) {
-                    sellPriceEl.value = "";
+                    sellLimitEl.value = "";
                     sellAmountEl.value = "";
-                    state.sellPrice = { valid: false, error: "" };
+                    state.sellLimit = { valid: false, error: "" };
                     state.sellAmount = { valid: false, error: "" };
-                    renderField(sellPriceEl, sellPriceError, state.sellPrice);
+                    renderField(sellLimitEl, sellLimitError, state.sellLimit);
                     renderField(sellAmountEl, sellAmountError, state.sellAmount);
                     sellError.textContent = "";
                     updateSellButton();
@@ -322,57 +321,19 @@
                 const btn = e.target.closest("button[data-buy-index]");
                 if (!btn) return;
                 const idx = Number(btn.dataset.buyIndex);
-                const res = engine.deleteBuy({ index: idx });
-                if ("ok" in res) {
+                const res = engine.deleteBuyAt(idx);
+                if (res) {
                     tryMatch();
-                } else {
-                    buyError.textContent = res.error;
                 }
             });
             tbodySell.addEventListener("click", (e) => {
                 const btn = e.target.closest("button[data-sell-index]");
                 if (!btn) return;
                 const idx = Number(btn.dataset.sellIndex);
-                const res = engine.deleteSell({ index: idx });
-                if ("ok" in res) {
+                const res = engine.deleteSellAt(idx);
+                if (res) {
                     tryMatch();
-                } else {
-                    sellError.textContent = res.error;
                 }
-            });
-
-            $("resetButton").addEventListener("click", () => {
-                engine.reset();
-                state.poolBase    = { valid: false, error: "" };
-                state.poolQuote   = { valid: false, error: "" };
-                state.feeE4       = { valid: true,  error: "" };
-                state.buyPrice    = { valid: false, error: "" };
-                state.buyAmount   = { valid: false, error: "" };
-                state.sellPrice   = { valid: false, error: "" };
-                state.sellAmount  = { valid: false, error: "" };
-                poolBaseEl.value = "";
-                poolQuoteEl.value = "";
-                feeE4El.value = "5";
-                buyPriceEl.value = "1.0";
-                buyAmountEl.value = "";
-                sellPriceEl.value = "1.0";
-                sellAmountEl.value = "";
-                buyError.textContent = "";
-                sellError.textContent = "";
-                buyPriceError.textContent = "";
-                buyAmountError.textContent = "";
-                sellPriceError.textContent = "";
-                sellAmountError.textContent = "";
-                renderField(poolBaseEl, poolBaseError, state.poolBase);
-                renderField(poolQuoteEl, poolQuoteError, state.poolQuote);
-                renderField(feeE4El, feeE4Error, state.feeE4);
-                renderField(buyPriceEl, buyPriceError, state.buyPrice);
-                renderField(buyAmountEl, buyAmountError, state.buyAmount);
-                renderField(sellPriceEl, sellPriceError, state.sellPrice);
-                renderField(sellAmountEl, sellAmountError, state.sellAmount);
-                updateBuyButton();
-                updateSellButton();
-                tryMatch();
             });
 
             // ─── Initial render ───────────────────────────────────────────────
