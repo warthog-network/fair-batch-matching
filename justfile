@@ -15,7 +15,7 @@ compile:
 # reliably); the justfile owns the staging.
 stage:
     mkdir -p demo/out
-    cp -f demo/src/demo.html demo/src/server.py demo/src/README.md demo/out/
+    cp -f demo/src/demo.html demo/src/server.py demo/src/README.md LICENSE demo/out/
 
 # Copy the runtime parts of pkg/dist/ into demo/out for the demo zip.
 # .d.ts files stay in pkg/dist/ (they ship via the npm tarball instead,
