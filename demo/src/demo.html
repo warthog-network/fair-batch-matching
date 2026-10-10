@@ -193,13 +193,11 @@
 
             // ─── Single source of match() calls ─────────────────────────────
             // `tryMatch()` is the *only* place that calls `engine.match()`.
-            // It early-returns (clearing lastMatch) if the pool is invalid.
+            // `engine.match()` always returns a full result regardless of
+            // pool state — the order book is always correct, the pool
+            // parts are zero when the pool is empty.
             function tryMatch() {
-                if (state.poolBase.valid && state.poolQuote.valid) {
-                    state.lastMatch = engine.match();
-                } else {
-                    state.lastMatch = null;
-                }
+                state.lastMatch = engine.match();
                 renderMatchReadiness();
                 renderMatch();
                 renderOrders();
@@ -207,13 +205,11 @@
 
             // ─── Button gating ────────────────────────────────────────────────
             function updateBuyButton() {
-                const ready = state.poolBase.valid && state.poolQuote.valid
-                    && state.buyLimit.valid && state.buyAmount.valid;
+                const ready = state.buyLimit.valid && state.buyAmount.valid;
                 addBuyButton.disabled = !ready;
             }
             function updateSellButton() {
-                const ready = state.poolBase.valid && state.poolQuote.valid
-                    && state.sellLimit.valid && state.sellAmount.valid;
+                const ready = state.sellLimit.valid && state.sellAmount.valid;
                 addSellButton.disabled = !ready;
             }
 
@@ -278,6 +274,25 @@
                 renderField(sellAmountEl, sellAmountError, state.sellAmount);
                 updateSellButton();
             });
+
+            // Validate fields with default values so state reflects
+            // reality on page load. (Without this, the limit field has
+            // `value="1.0"` in HTML but state.buyLimit.valid stays
+            // false until the user changes the value.)
+            for (const [el, key, validator] of [
+                [buyLimitEl,   "buyLimit",   engine.validateLimit],
+                [buyAmountEl,  "buyAmount",  engine.validateBaseAmount],
+                [sellLimitEl,  "sellLimit",  engine.validateLimit],
+                [sellAmountEl, "sellAmount", engine.validateQuoteAmount],
+            ]) {
+                if (el.value) {
+                    const res = validator(el.value);
+                    state[key].valid = "ok" in res;
+                    state[key].error = "error" in res ? res.error : "";
+                }
+            }
+            updateBuyButton();
+            updateSellButton();
 
             addBuyButton.addEventListener("click", () => {
                 const res = engine.addBuy({
