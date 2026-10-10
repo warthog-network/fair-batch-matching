@@ -37,7 +37,7 @@
 
         <section>
             <h2>Add Buy (spend WART to buy TOKEN)</h2>
-            <label>Limit: <input id="buyLimit" type="text" value="1.0"></label>
+            <label>Limit: <input id="buyLimit" type="text"></label>
             <p class="error-note" id="buyLimitError"></p>
             <label>Amount (WART): <input id="buyAmount" type="text"></label>
             <p class="error-note" id="buyAmountError"></p>
@@ -47,7 +47,7 @@
 
         <section>
             <h2>Add Sell (sell TOKEN for WART)</h2>
-            <label>Limit: <input id="sellLimit" type="text" value="1.0"></label>
+            <label>Limit: <input id="sellLimit" type="text"></label>
             <p class="error-note" id="sellLimitError"></p>
             <label>Amount (TOKEN): <input id="sellAmount" type="text"></label>
             <p class="error-note" id="sellAmountError"></p>
@@ -304,14 +304,7 @@
                     amount: buyAmountEl.value,
                 });
                 if ("ok" in res) {
-                    buyLimitEl.value = "";
-                    buyAmountEl.value = "";
-                    state.buyLimit = { valid: false, error: "" };
-                    state.buyAmount = { valid: false, error: "" };
-                    renderField(buyLimitEl, buyLimitError, state.buyLimit);
-                    renderField(buyAmountEl, buyAmountError, state.buyAmount);
                     buyError.textContent = "";
-                    updateBuyButton();
                     tryMatch();
                 } else {
                     buyError.textContent = res.error;
@@ -323,14 +316,7 @@
                     amount: sellAmountEl.value,
                 });
                 if ("ok" in res) {
-                    sellLimitEl.value = "";
-                    sellAmountEl.value = "";
-                    state.sellLimit = { valid: false, error: "" };
-                    state.sellAmount = { valid: false, error: "" };
-                    renderField(sellLimitEl, sellLimitError, state.sellLimit);
-                    renderField(sellAmountEl, sellAmountError, state.sellAmount);
                     sellError.textContent = "";
-                    updateSellButton();
                     tryMatch();
                 } else {
                     sellError.textContent = res.error;
