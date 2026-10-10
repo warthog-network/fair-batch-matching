@@ -279,11 +279,15 @@
             // reality on page load. (Without this, the limit field has
             // `value="1.0"` in HTML but state.buyLimit.valid stays
             // false until the user changes the value.)
+            //
+            // Arrow functions preserve the `engine` binding for the call.
+            // (Embind-exposed methods are bound to the instance only
+            // at the method-call site, not when stored in a variable.)
             for (const [el, key, validator] of [
-                [buyLimitEl,   "buyLimit",   engine.validateLimit],
-                [buyAmountEl,  "buyAmount",  engine.validateBaseAmount],
-                [sellLimitEl,  "sellLimit",  engine.validateLimit],
-                [sellAmountEl, "sellAmount", engine.validateQuoteAmount],
+                [buyLimitEl,   "buyLimit",   (v) => engine.validateLimit(v)],
+                [buyAmountEl,  "buyAmount",  (v) => engine.validateBaseAmount(v)],
+                [sellLimitEl,  "sellLimit",  (v) => engine.validateLimit(v)],
+                [sellAmountEl, "sellAmount", (v) => engine.validateQuoteAmount(v)],
             ]) {
                 if (el.value) {
                     const res = validator(el.value);
