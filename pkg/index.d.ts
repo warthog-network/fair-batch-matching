@@ -212,8 +212,12 @@ export interface FbmEngineClass {
 
 export interface InitOptions {
     /**
-     * Override wasm URL resolution. Default keeps `fbm.wasm` next to
-     * `fbm.js`, matching the convention used by the demo bundle.
+     * Override resolution for non-wasm asset paths. The package routes
+     * the `fbm.wasm` path through its own resolution (`?url` in
+     * Vite/Webpack/Parcel/Bun, sibling-file fallback for raw ESM) —
+     * most consumers won't need this. If you pass a `locateFile` it
+     * handles non-wasm paths; the wasm path is always routed through
+     * the package's own resolution.
      */
     locateFile?: (path: string, scriptDirectory: string) => string;
 }
