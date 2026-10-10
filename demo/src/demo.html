@@ -31,7 +31,7 @@
 
         <section>
             <h2>Settings</h2>
-            <label>Fee (E4, 0–9999): <input id="feeE4" type="number" min="0" max="9999"></label>
+            <label>Fee (E4, 0–9999): <input id="feeE4" type="number" min="0" max="9999" required></label>
             <p class="error-note" id="feeE4Error"></p>
         </section>
 
@@ -234,15 +234,23 @@
                 updateSellButton();
             });
             feeE4El.addEventListener("input", () => {
-                const n = Number(feeE4El.value);
-                if (!Number.isFinite(n) || !Number.isInteger(n)) {
+                // For <input type="number" required>, `validity.valid`
+                // catches: empty input (valueMissing), letters
+                // (badInput), out-of-range (rangeOverflow/Underflow),
+                // and non-integer (stepMismatch). el.value can hide
+                // invalid input from the .value property, so don't
+                // rely on Number() alone.
+                if (!feeE4El.validity.valid) {
                     state.feeE4.valid = false;
-                    state.feeE4.error = "must be an integer";
-                } else {
-                    const res = engine.setFeeE4(n);
-                    state.feeE4.valid = "ok" in res;
-                    state.feeE4.error = "error" in res ? res.error : "";
+                    state.feeE4.error = feeE4El.validationMessage
+                        || "must be a number 0-9999";
+                    renderField(feeE4El, feeE4Error, state.feeE4);
+                    tryMatch();
+                    return;
                 }
+                const res = engine.setFeeE4(Number(feeE4El.value));
+                state.feeE4.valid = "ok" in res;
+                state.feeE4.error = "error" in res ? res.error : "";
                 renderField(feeE4El, feeE4Error, state.feeE4);
                 tryMatch();
             });
