@@ -59,7 +59,7 @@ jobs:
 
       - name: Configure + build
         run: |
-          meson setup cpp/build-wasm --cross-file=cpp/crosscompile/emscripten.txt --prefix=/
+          meson setup cpp/build-wasm cpp --cross-file=cpp/crosscompile/emscripten.txt --prefix=/
           meson compile -C cpp/build-wasm
 
       - name: Verify Embind symbols present
@@ -93,14 +93,8 @@ jobs:
         working-directory: pkg
         run: npm run build
 
-      - name: Stage package files into out/ for the demo bundle
-        run: |
-          # Copy the runtime parts of pkg/dist/ into out/ for the demo zip.
-          # .d.ts files stay in pkg/dist/ (they ship via the npm tarball instead,
-          # which is what TypeScript consumers need).
-          mkdir -p out/pkg/dist/src
-          cp -f pkg/dist/index.js pkg/dist/fbm.js pkg/dist/fbm.wasm out/pkg/dist/
-          cp -f pkg/dist/src/loader.js out/pkg/dist/src/
+      - name: Stage package files into demo/out/warthog-fbm/
+        run: just stage-pkg
 
       - name: Run TS tests
         working-directory: pkg
