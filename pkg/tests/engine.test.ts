@@ -230,6 +230,9 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
     e.addBuy({ limit: "6", amount: "600" }); // matches sells at 7
     e.addBuy({ limit: "8", amount: "800" }); // matches sells at 7 fully, then via pool
     const m = e.match();
+    // Regenerated after the matcher change in 6b176fc: the CASE (II) tie-break in
+    // `bisect_fixed_price` now splits the buy at limit 4 between the order book
+    // and the pool, where it previously filled nothing there.
     assert.deepEqual(m, {
         buys: [
             {
@@ -244,27 +247,27 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             },
             {
                 amount: "400.00000000",
-                filled: "0",
+                filled: "297.55156325",
                 limit: "4.000000",
             },
         ],
         filled: {
-            inBaseBuyer: "287.209",
-            inQuoteSeller: "1463.08413581",
+            inBaseBuyer: "390.413",
+            inQuoteSeller: "1200.00000000",
             outBaseSeller: "300.000",
-            outQuoteBuyer: "1400.00000000",
-            priceBuyer: 4.874499058177147,
-            priceSeller: 4.876947119366667,
+            outQuoteBuyer: "1697.55156325",
+            priceBuyer: 4.348091798300774,
+            priceSeller: 4,
         },
         matched: {
-            base: "287.209",
-            price: 4.874499058177147,
-            quote: "1400.00000000",
+            base: "300.000",
+            price: 4,
+            quote: "1200.00000000",
         },
         poolAfter: {
-            base: "1012.791",
-            price: 4.874565299444801,
-            quote: "4936.91586419",
+            base: "909.587",
+            price: 6.044008504134293,
+            quote: "5497.55156325",
         },
         poolBefore: {
             base: "1000.000",
@@ -289,10 +292,10 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             },
         ],
         toPool: {
-            base: "12.791",
-            isQuote: false,
-            price: 4.931915863497772,
-            quote: "63.08413581",
+            base: "90.413",
+            isQuote: true,
+            price: 5.503097599349651,
+            quote: "497.55156325",
         },
     } as typeof m);
 });
