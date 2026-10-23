@@ -20,11 +20,38 @@ export interface FbmConfig {
  * whether passed to `addBuy` / `addSell` or returned by `getBuyAt` /
  * `getSellAt` / `deleteBuyAt` / `deleteSellAt`. The `amount` is formatted
  * in the order's own decimals: WART (8 dp) for buys, `baseDecimals` for
- * sells. The `limit` is the canonical decimal form.
+ * sells.
+ *
+ * The `limit` is the decimal rendering of the order's price, produced by
+ * the shortest string that parses back to the same value.
  */
 export interface Order {
     amount: string;
     limit: string;
+    /**
+     * The limit as raw price-grid bits: `mantissa | exponent << 16`.
+     *
+     * This is the exact form. The engine snaps every limit onto a
+     * 16-bit mantissa grid, and the decimal `limit` string is a
+     * rendering of that grid point, so re-parsing it can land on a
+     * neighbouring cell. Passing `limitBits` back to `addBuy` /
+     * `addSell` restores the order bit for bit, with no decimal round
+     * trip in between.
+     */
+    limitBits: number;
+}
+
+/**
+ * Input for `addBuy` / `addSell`.
+ *
+ * Provide either `limit` (decimal string, snapped onto the price grid)
+ * or `limitBits` (exact grid value). `limitBits` takes precedence when
+ * both are given.
+ */
+export interface OrderInput {
+    amount: string;
+    limit?: string;
+    limitBits?: number;
 }
 
 /* ---------- Input interfaces ---------- */
@@ -152,8 +179,8 @@ export type FbmEngine = Omit<
     setPool(input: SetPoolInput): MutatorResult;
     /** Sets the pool fee in 1/10000 units (basis points), 0..9999. */
     setFeeE4(e4: number): MutatorResult;
-    addBuy(input: Order): MutatorResult;
-    addSell(input: Order): MutatorResult;
+    addBuy(input: OrderInput): MutatorResult;
+    addSell(input: OrderInput): MutatorResult;
     /**
      * Removes the buy order at the given `index` (from the most recent
      * `match().buys`). Returns the deleted `Order` (the same shape as

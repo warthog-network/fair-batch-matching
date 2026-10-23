@@ -78,7 +78,14 @@ public:
     double to_double_adjusted(TokenDecimals prec) const
     {
         auto b10e { base10_decimals_exponent(prec) };
-        return to_double_raw() * std::pow(10.0, -b10e);
+        // Divide by the positive power of ten instead of multiplying by
+        // 10^-b10e. `std::pow(10.0, +b10e)` is exactly representable for
+        // every b10e this can produce (0..8), while the negative power is
+        // not, so the multiplication added a 1-ulp error for any
+        // baseDecimals != 8. That broke the inverse property with
+        // `from_double_adjusted`: a limit of 7 at baseDecimals=3 printed
+        // back as 7.000000000000001.
+        return to_double_raw() / std::pow(10.0, b10e);
     }
     [[nodiscard]] static std::optional<Price_uint64>
     from_mantissa_exponent(uint32_t mantissa, int exponent)

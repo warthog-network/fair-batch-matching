@@ -156,7 +156,7 @@ test("deleteBuyAt returns the deleted order", async () => {
     assert.equal(e.match().sells.length, 1);
 
     const r = e.deleteBuyAt(0);
-    assert.deepEqual(r, { amount: "8.00000000", limit: "1.000000" });
+    assert.deepEqual(r, { amount: "8.00000000", limit: "1", limitBits: 5292880 });
     assert.equal(e.match().buys.length, 0);
     assert.equal(e.match().sells.length, 1);
 });
@@ -171,7 +171,7 @@ test("deleteSellAt returns the deleted order", async () => {
     assert.equal(e.match().sells.length, 1);
 
     const r = e.deleteSellAt(0);
-    assert.deepEqual(r, { amount: "8.000", limit: "1.000000" });
+    assert.deepEqual(r, { amount: "8.000", limit: "1", limitBits: 5292880 });
     assert.equal(e.match().buys.length, 1);
     assert.equal(e.match().sells.length, 0);
 });
@@ -185,7 +185,7 @@ test("getBuyAt returns the order at the given index", async () => {
     e.addBuy({ limit: "2", amount: "3" });
     const got = e.getBuyAt(0);
     // buys[0] is the highest-limit buy (DESC), so limit=2 comes first
-    assert.deepEqual(got, { amount: "3.00000000", limit: "2.000000" });
+    assert.deepEqual(got, { amount: "3.00000000", limit: "2", limitBits: 5358416 });
 });
 
 test("getSellAt returns the highest-limit sell first", async () => {
@@ -195,7 +195,7 @@ test("getSellAt returns the highest-limit sell first", async () => {
     e.addSell({ limit: "2", amount: "3" });
     const got = e.getSellAt(0);
     // sells[0] is the highest-limit sell (DESC), so limit=2 comes first
-    assert.deepEqual(got, { amount: "3.000", limit: "2.000000" });
+    assert.deepEqual(got, { amount: "3.000", limit: "2", limitBits: 5358416 });
 });
 
 // ─── Match ──────────────────────────────────────────────────────────────
@@ -238,17 +238,20 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             {
                 amount: "800.00000000",
                 filled: "800.00000000",
-                limit: "8.000000",
+                limit: "8",
+                limitBits: 5489488,
             },
             {
                 amount: "600.00000000",
                 filled: "600.00000000",
-                limit: "6.000000",
+                limit: "6",
+                limitBits: 5476988,
             },
             {
                 amount: "400.00000000",
                 filled: "297.55156325",
-                limit: "4.000000",
+                limit: "4",
+                limitBits: 5423952,
             },
         ],
         filled: {
@@ -278,17 +281,20 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             {
                 amount: "300.000",
                 filled: "0",
-                limit: "7.000000",
+                limit: "7",
+                limitBits: 5483238,
             },
             {
                 amount: "200.000",
                 filled: "200.000",
-                limit: "4.000000",
+                limit: "4",
+                limitBits: 5423952,
             },
             {
                 amount: "100.000",
                 filled: "100.000",
-                limit: "3.000000",
+                limit: "3",
+                limitBits: 5411452,
             },
         ],
         toPool: {
@@ -298,4 +304,193 @@ test("snapshot: 6 orders + pool (baseDecimals=3, feeE4=10)", async () => {
             quote: "497.55156325",
         },
     } as typeof m);
+});
+// ─── Limit round-trip (regression) ───────────────────────────────────────
+//
+// `make_order` used to render limits with `std::to_string`, i.e. 6 fixed
+// decimal places. Reading an order back out and re-adding it then moved
+// the price, because printing rounds to nearest while `from_double` floors
+// onto the 16-bit mantissa grid: a save/restore cycle shifted limits down
+// by up to two grid steps, and at small magnitudes every distinct price
+// printed as "0.000000". Limits must be a fixed point of
+// `parse(print(limit))` so a book can be exported and restored exactly.
+
+test("getBuyAt / addBuy round-trip is exact", async () => {
+    const e = await freshEngine();
+    e.addBuy({ limit: "1.732153", amount: "10" });
+    const original = e.getBuyAt(0)!;
+
+    const restored = await freshEngine();
+    restored.addBuy(original);
+
+    assert.deepEqual(restored.getBuyAt(0), original);
+});
+
+test("getSellAt / addSell round-trip is exact", async () => {
+    const e = await freshEngine();
+    e.addSell({ limit: "0.8000049", amount: "10" });
+    const original = e.getSellAt(0)!;
+
+    const restored = await freshEngine();
+    restored.addSell(original);
+
+    assert.deepEqual(restored.getSellAt(0), original);
+});
+
+test("limits survive a restore at small magnitudes", async () => {
+    // Every one of these used to print as "0.000000" under the old
+    // 6-decimal rendering, so the whole book collapsed to one price.
+    const limits = ["0.000015259", "0.000015260", "0.000015261", "0.000015262"];
+    const e = await freshEngine();
+    for (const limit of limits) e.addSell({ limit, amount: "1" });
+
+    const before = e.match().sells;
+    assert.equal(before.length, limits.length);
+
+    const restored = await freshEngine();
+    for (const order of before) {
+        restored.addSell({ limit: order.limit, amount: order.amount });
+    }
+    assert.deepEqual(restored.match().sells, before);
+});
+
+test("a full book and pool survive a save/restore cycle", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    // Off-grid limits: these are the ones that drifted before the fix.
+    e.addBuy({ limit: "1.732153", amount: "20" });
+    e.addBuy({ limit: "1.9", amount: "15" });
+    e.addSell({ limit: "0.8000049", amount: "20" });
+    e.addSell({ limit: "2.1", amount: "10" });
+    const before = e.match();
+
+    const restored = await freshEngine();
+    restored.setPool(e.getPool());
+    for (const o of before.buys) restored.addBuy({ limit: o.limit, amount: o.amount });
+    for (const o of before.sells) restored.addSell({ limit: o.limit, amount: o.amount });
+
+    assert.deepEqual(restored.match(), before);
+});
+
+test("limits are the shortest round-trip decimal, not 6 fixed places", async () => {
+    const e = await freshEngine();
+    e.addBuy({ limit: "1", amount: "1" });
+    e.addBuy({ limit: "1.5", amount: "1" });
+    assert.equal(e.getBuyAt(0)!.limit, "1.5");
+    assert.equal(e.getBuyAt(1)!.limit, "1");
+});
+
+// ─── Input validation errors (regression) ────────────────────────────────
+//
+// `parse_order` used to call `.value()` on a possibly-empty optional and to
+// cast with `emval::as<std::string>` before checking the JS type. An
+// unparsable limit surfaced as "Cannot get limit", and a non-string limit
+// threw an uncatchable JS BindingError out of `addBuy` instead of returning
+// `{ error }`.
+
+test("unparsable limit returns an error instead of throwing", async () => {
+    const e = await freshEngine();
+    const r = e.addBuy({ limit: "1e999", amount: "1" });
+    assert.ok("error" in r);
+    assert.match(r.error, /Cannot parse limit "1e999"/);
+    assert.equal(e.match().buys.length, 0);
+});
+
+test("non-string fields return an error instead of throwing", async () => {
+    const e = await freshEngine();
+    for (const bad of [
+        { limit: 5 as unknown as string, amount: "1" },
+        { limit: null as unknown as string, amount: "1" },
+        { limit: "1", amount: 5 as unknown as string },
+    ]) {
+        const r = e.addBuy(bad);
+        assert.ok("error" in r, JSON.stringify(bad));
+    }
+    assert.equal(e.match().buys.length, 0);
+});
+
+test("non-object order returns an error instead of throwing", async () => {
+    const e = await freshEngine();
+    const r = e.addSell(undefined as never);
+    assert.ok("error" in r);
+});
+
+// ─── Raw price-grid bits (limitBits) ────────────────────────────────────
+//
+// The decimal `limit` string is a rendering of the price grid: parsing
+// it back re-snaps it, and at baseDecimals != 8 the scaling through a
+// double can drop a grid cell. `limitBits` carries the grid value
+// itself (mantissa | exponent << 16), so an order restored from bits is
+// identical to the original, whatever the decimal count is.
+
+test("limitBits round-trips exactly through addBuy / addSell", async () => {
+    const e = await freshEngine();
+    e.addBuy({ limit: "1.732153", amount: "10" });
+    e.addSell({ limit: "0.8000049", amount: "20" });
+
+    const restored = await freshEngine();
+    restored.addBuy({ limitBits: e.getBuyAt(0)!.limitBits, amount: e.getBuyAt(0)!.amount });
+    restored.addSell({ limitBits: e.getSellAt(0)!.limitBits, amount: e.getSellAt(0)!.amount });
+
+    assert.deepEqual(restored.getBuyAt(0), e.getBuyAt(0));
+    assert.deepEqual(restored.getSellAt(0), e.getSellAt(0));
+});
+
+test("limitBits is exact at baseDecimals != 8, where the decimal string is not", async () => {
+    const e = await freshEngine({ baseDecimals: 3 });
+    e.addBuy({ limit: "2.2125", amount: "10" });
+    const original = e.getBuyAt(0)!;
+
+    const restored = await freshEngine({ baseDecimals: 3 });
+    restored.addBuy({ limitBits: original.limitBits, amount: original.amount });
+
+    assert.deepEqual(restored.getBuyAt(0), original);
+});
+
+test("every order accessor exposes limitBits", async () => {
+    const e = await freshEngine();
+    e.addBuy({ limit: "1.5", amount: "1" });
+    e.addSell({ limit: "2.5", amount: "1" });
+
+    for (const o of [e.getBuyAt(0)!, e.getSellAt(0)!, ...e.match().buys, ...e.match().sells]) {
+        assert.equal(typeof o.limitBits, "number");
+        assert.ok(Number.isInteger(o.limitBits));
+        assert.ok(o.limitBits >= 0 && o.limitBits <= 0x7fffff);
+    }
+});
+
+test("limitBits wins over a conflicting decimal limit", async () => {
+    const e = await freshEngine();
+    e.addBuy({ limit: "1.5", amount: "1" });
+    const bits = e.getBuyAt(0)!.limitBits;
+
+    const other = await freshEngine();
+    other.addBuy({ limit: "9.9", limitBits: bits, amount: "1" });
+
+    assert.equal(other.getBuyAt(0)!.limit, "1.5");
+});
+
+test("an invalid limitBits returns an error instead of throwing", async () => {
+    const e = await freshEngine();
+    // 0 is not a valid mantissa/exponent pair, so it cannot name a price.
+    const r = e.addBuy({ limitBits: 0, amount: "1" });
+    assert.ok("error" in r);
+    assert.equal(e.match().buys.length, 0);
+});
+
+test("a whole book restored from limitBits is identical", async () => {
+    const e = await freshEngine();
+    e.setPool({ base: "100", quote: "200" });
+    e.addBuy({ limit: "1.732153", amount: "20" });
+    e.addBuy({ limit: "1.9", amount: "15" });
+    e.addSell({ limit: "0.8000049", amount: "20" });
+    e.addSell({ limit: "2.1", amount: "10" });
+    const before = e.match();
+
+    const restored = await freshEngine();
+    restored.setPool(e.getPool());
+    for (const o of before.buys) restored.addBuy({ limitBits: o.limitBits, amount: o.amount });
+    for (const o of before.sells) restored.addSell({ limitBits: o.limitBits, amount: o.amount });
+
+    assert.deepEqual(restored.match(), before);
 });

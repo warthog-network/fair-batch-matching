@@ -100,7 +100,22 @@ e.getSellAt(0);    // get first sell (highest limit in sells)
 e.deleteSellAt(0); // get and delete first sell
 ```
 
-These methods return the deleted order `Order` (`{ amount, limit }`) on success, or `null` if no order exists at that index. The order's limit is returned as a string.
+These methods return the deleted order `Order` (`{ amount, limit, limitBits }`) on success, or `null` if no order exists at that index. The order's limit is returned as a string, and its exact price-grid value as `limitBits` (see below).
+
+#### Exporting and Restoring a Book
+
+Every limit lives on a 16-bit mantissa price grid, so a limit that goes through a decimal string can land on a neighbouring grid cell when it is parsed back. The `limitBits` field carries the grid value itself (`mantissa | exponent << 16`), which makes an export/restore cycle lossless:
+
+```ts
+// Export: keep limitBits, not the limit string.
+const exported = e.match().buys.map((o) => ({ limitBits: o.limitBits, amount: o.amount }));
+
+// Restore: pass limitBits back.
+const restored = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+for (const o of exported) restored.addBuy(o);
+```
+
+`addBuy` and `addSell` accept either `limit` (a decimal string, snapped onto the grid) or `limitBits` (the exact grid value). `limitBits` wins when both are given.
 
 ### Pre-Validating Input
 
@@ -132,8 +147,9 @@ const m: MatchResult = {
   //   amount = swap's original input amount
   //   filled = how much was consumed by the match
   //   limit  = the order's limit (quote per base); same field as the add input
-  buys:  [{ amount: "5.00000000",  filled: "0",           limit: "1.000000" }],
-  sells: [{ amount: "10.00000000", filled: "10.00000000", limit: "1.000000" }],
+  //   limitBits = the order's exact price-grid value
+  buys:  [{ amount: "5.00000000",  filled: "0",           limit: "1", limitBits: 4227072 }],
+  sells: [{ amount: "10.00000000", filled: "10.00000000", limit: "1", limitBits: 4227072 }],
 
   // Pool reserves before the match. `price` is the spot price quote/base or nil.
   poolBefore: { base: "100.00000000", quote: "200.00000000", price: 2 },

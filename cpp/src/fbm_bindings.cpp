@@ -1,9 +1,13 @@
 #include "defi/uint64/orderbook.hpp"
 #include "general/funds.hpp"
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <emscripten.h>
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <optional>
+#include <stdexcept>
 #include <stdio.h>
 using namespace std;
 
@@ -19,10 +23,9 @@ using emval = emscripten::val;
  *
  * Mutators are atomic: input is parsed before any state mutation, and
  * a parse failure returns `{ error: ... }` with **no** state change.
- * Applies to `setPool` and `setFee`.
  *
- * `match()` is the only state-reading operation and is always safe to
- * call — it returns a full result even with a `(0, 0)` pool.
+ * `match()` is always safe to call: it returns a full result even with
+ * a `(0, 0)` pool.
  *
  * See the `### fair-batch-matching` section in `AGENTS.md` for
  * cross-repo conventions (rename history, two-file TS declaration,
@@ -62,58 +65,49 @@ emval make_ok()
     return obj;
 }
 
-/*
- * Strict-range int parser used by baseDecimals / feeE4 / setFee.
- * Returns:
- *   - emval::null() if the field is missing or null (caller decides default).
- *   - emval { error } if the field is present but malformed / out of range.
- *   - emval::null() with *out set on success.
- *
- * Coerces via isNumber()/isString() + double/stod because Embind's
- * toWireType<int>/toWireType<std::string> throw JS TypeErrors on
- * non-matching types that C++ try/catch can't unwind.
- */
-emval parse_strict_int_field(emval v, const char* key, long minVal, long maxVal, long* out)
+// Upper bound of Price_uint64::to_uint32().
+constexpr long kMaxLimitBits { 0x7FFFFF };
+
+// Returns nullopt when the key is absent, throws when it is present but
+// malformed. The type checks are required: a bad cast throws a JS
+// exception that C++ cannot catch.
+std::optional<long> parse_optional_int_field(emval v, const char* key, long minVal, long maxVal)
 {
     if (!v.call<bool>("hasOwnProperty", std::string(key))
         || v[key].isUndefined()
         || v[key].isNull()) {
-        return emval::null();
+        return std::nullopt;
     }
-    emval field { v[key] };
-    auto rangeStr = std::string("'") + key + "' must be an integer in "
-        + std::to_string(minVal) + ".." + std::to_string(maxVal);
+
+    const emval field { v[key] };
+    const std::string range { std::string("'") + key + "' must be an integer in "
+        + std::to_string(minVal) + ".." + std::to_string(maxVal) };
+
     if (field.isNumber()) {
-        double n = field.as<double>();
-        long rounded = static_cast<long>(n);
-        if (n != n || n < static_cast<double>(minVal)
-            || n > static_cast<double>(maxVal)
-            || static_cast<double>(rounded) != n) {
-            return make_error(rangeStr + ", got " + std::to_string(rounded));
+        const double n { field.as<double>() };
+        if (!std::isfinite(n) || n < static_cast<double>(minVal)
+            || n > static_cast<double>(maxVal) || std::trunc(n) != n) {
+            throw std::runtime_error(range + ", got " + std::to_string(n));
         }
-        *out = rounded;
-        return emval::null();
+        return static_cast<long>(n);
     }
+
     if (field.isString()) {
-        std::string raw;
+        const std::string raw { field.as<std::string>() };
+        size_t pos { 0 };
+        long parsed {};
         try {
-            raw = field.as<std::string>();
+            parsed = std::stol(raw, &pos);
         } catch (...) {
-            return make_error(rangeStr + ", got non-string value");
+            throw std::runtime_error(range + ", got \"" + raw + "\"");
         }
-        try {
-            size_t pos = 0;
-            long parsed = std::stol(raw, &pos);
-            if (pos != raw.size() || parsed < minVal || parsed > maxVal) {
-                return make_error(rangeStr + ", got \"" + raw + "\"");
-            }
-            *out = parsed;
-            return emval::null();
-        } catch (...) {
-            return make_error(rangeStr + ", got \"" + raw + "\"");
+        if (pos != raw.size() || parsed < minVal || parsed > maxVal) {
+            throw std::runtime_error(range + ", got \"" + raw + "\"");
         }
+        return parsed;
     }
-    return make_error(rangeStr + ", got non-numeric value");
+
+    throw std::runtime_error(range + ", got non-numeric value");
 }
 
 } // anonymous namespace
@@ -127,29 +121,47 @@ private:
     // the WART-vs-baseToken precision difference. Without `_adjusted`,
     // the stored value would round-trip through `to_double_adjusted`
     // as a tiny number (~0.00005) instead of the user-entered value (5).
+    // limitBits is exact, the decimal limit is snapped onto the grid.
+    Price_uint64 parse_limit(emval v, std::optional<long> limitBits) const
+    {
+        if (limitBits) {
+            const auto price { Price_uint64::from_uint32(static_cast<uint32_t>(*limitBits)) };
+            if (!price)
+                throw std::runtime_error("Invalid limitBits value " + std::to_string(*limitBits));
+            return *price;
+        }
+        const std::string raw { v["limit"].as<std::string>() };
+        const auto price { Price_uint64::from_string_adjusted(raw, baseDecimals_) };
+        if (!price)
+            throw std::runtime_error("Cannot parse limit \"" + raw + "\"");
+        return *price;
+    }
+
     defi::Order_uint64 parse_order(emval v, TokenDecimals decimals)
     {
-        if (v["limit"].isUndefined())
+        // Type checks first: emval::as<std::string> on a non-string throws
+        // a JS exception that C++ cannot catch. limitBits wins when both
+        // are given.
+        if (v.isNull() || v.typeOf().as<std::string>() != "object")
+            throw std::runtime_error("Order must be an object");
+
+        const auto limitBits { parse_optional_int_field(v, "limitBits", 0, kMaxLimitBits) };
+
+        if (v["limit"].isUndefined() && !limitBits)
             throw std::runtime_error("Missing 'limit' field");
         if (v["amount"].isUndefined())
             throw std::runtime_error("Missing 'amount' field");
-        Funds_uint64 amount { [&]() {
-            try {
-                std::string s { v["amount"].as<std::string>() };
-                if (auto o { Funds_uint64::parse(s, decimals) })
-                    return *o;
-            } catch (...) {
-            }
-            throw std::runtime_error("Cannot parse amount");
-        }() };
-        Price_uint64 price { [&]() {
-            try {
-                return Price_uint64::from_string_adjusted(v["limit"].as<std::string>(), baseDecimals_).value();
-            } catch (...) {
-                throw std::runtime_error("Cannot get limit");
-            }
-        }() };
-        return { amount, price };
+        if (!limitBits && !v["limit"].isString())
+            throw std::runtime_error("'limit' must be a string");
+        if (!v["amount"].isString())
+            throw std::runtime_error("'amount' must be a string");
+
+        const std::string amountRaw { v["amount"].as<std::string>() };
+        const auto amount { Funds_uint64::parse(amountRaw, decimals) };
+        if (!amount)
+            throw std::runtime_error("Cannot parse amount \"" + amountRaw + "\"");
+
+        return { *amount, parse_limit(v, limitBits) };
     }
 
 public:
@@ -166,18 +178,10 @@ public:
             return;
         }
 
-        long bd { 8 };
-        if (auto err = parse_strict_int_field(config, "baseDecimals", 0, 18, &bd);
-            !err.isNull()) {
-            throw std::runtime_error(err["error"].as<std::string>());
-        }
+        const long bd { parse_optional_int_field(config, "baseDecimals", 0, 18).value_or(8) };
         baseDecimals_ = TokenDecimals { static_cast<uint8_t>(bd) };
 
-        long fee { 5 };
-        if (auto err = parse_strict_int_field(config, "feeE4", 0, 9999, &fee);
-            !err.isNull()) {
-            throw std::runtime_error(err["error"].as<std::string>());
-        }
+        const long fee { parse_optional_int_field(config, "feeE4", 0, 9999).value_or(5) };
         feeE4_ = static_cast<uint32_t>(fee);
     }
 
@@ -382,19 +386,25 @@ private:
         return obj;
     }
 
-    // Formats an Order_uint64 as the unified `{ amount, limit }` JS
-    // object. `is_buy` controls the amount's decimal formatting: WART
-    // (8 dp) for buys, `baseDecimals` for sells. The limit is rendered
-    // as a decimal string via `std::to_string(to_double_adjusted(...))`,
-    // which gives at least 6 significant digits — sufficient for FBM
-    // limits (mantissa precision is 16 bits, well within double range).
+    // Formats an Order_uint64 as the unified `{ amount, limit, limitBits }`
+    // JS object. `is_buy` controls the amount's decimal formatting: WART
+    // (8 dp) for buys, `baseDecimals` for sells.
+    //
+    // to_chars gives the shortest round-trip string, so an order read back
+    // and re-added keeps its exact price. limitBits is the same value, raw.
     emval make_order(const defi::Order_uint64& order, bool is_buy) const
     {
         emval obj = emval::object();
         obj.set("amount", is_buy
             ? emval(order.amount.as_wart().to_string())
             : emval(order.amount.to_decimal(baseDecimals_).to_string()));
-        obj.set("limit", emval(std::to_string(order.limit.to_double_adjusted(baseDecimals_))));
+
+        std::array<char, 32> buf {};
+        const double limit { order.limit.to_double_adjusted(baseDecimals_) };
+        auto [ptr, ec] = std::to_chars(buf.data(), buf.data() + buf.size(), limit);
+        obj.set("limit", emval(ec == std::errc {} ? std::string(buf.data(), ptr) : std::string()));
+        obj.set("limitBits", emval(static_cast<uint32_t>(order.limit.to_uint32())));
+
         return obj;
     }
 

@@ -9,10 +9,12 @@ The matching algorithm is described in [my FBM paper](https://warthog.network/Fa
 
 ## What this repo provides
 
-- A C++23 implementation of FBM under `src/`.
-- A WASM target can be built which exposes six JS-callable functions:
-  `addBuy`, `addSell`, `editPool`, `deleteOrder`, `setFee`,
-  `clearAndSetBaseDecimals`.
+- A C++23 implementation of FBM under `cpp/src/`.
+- A WASM target which exposes a single `FbmEngine` class with fourteen JS-callable methods:
+  `setPool`, `setFeeE4`, `addBuy`, `addSell`, `deleteBuyAt`, `deleteSellAt`,
+  `validateLimit`, `validateBaseAmount`, `validateQuoteAmount`,
+  `getConfig`, `getPool`, `getBuyAt`, `getSellAt`, `match`.
+- The `warthog-fbm` npm package under `pkg/`.
 - A standalone reference UI in `demo/` to demonstrate the use of the WASM build.
 
 ## Live demo
@@ -29,8 +31,8 @@ for the list, or jump to the
 There are three assets per release:
 
 - **`fbm.wasm` + `fbm.js`: always shipped and used together.**
-  `fbm.js` is the Embind loader (~130 KB) that fetches and
-  instantiates `fbm.wasm` (~220 KB) next to itself. Place both files
+  `fbm.js` is the Embind loader (~160 KB) that fetches and
+  instantiates `fbm.wasm` (~370 KB) next to itself. Place both files
   side by side; renaming either breaks the pairing. See
   [demo/README.md](demo/README.md#api) for the JS bindings.
 - **`fbm-demo.zip`**: a self-contained demo bundle containing
@@ -52,9 +54,11 @@ import the loader:
 
 ```html
 <script type="module">
-    import init from "./fbm.js";
-    const Module = await init();
-    Module.addBuy({ price: "1.5", amount: "5" });
+    import FbmEngine from "./fbm.js";
+    await FbmEngine.init();
+    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+    engine.setPool({ base: "100", quote: "200" });
+    engine.addBuy({ limit: "1.5", amount: "5" });
 </script>
 ```
 
@@ -63,16 +67,30 @@ files from the same origin.
 
 ## API
 
-The wasm exposes six JS-callable functions:
+The wasm exposes a single `FbmEngine` class. Construct one instance per
+market; the module is shared, the state is not.
 
+```ts
+import FbmEngine from "warthog-fbm";
+
+await FbmEngine.init();
+const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+```
+
+Its methods:
+
+- `setPool` / `getPool` — set and read the pool reserves
+- `setFeeE4` — change the pool fee (in 1/10000 units)
 - `addBuy` / `addSell` — submit limit orders
-- `editPool` — set pool reserves
-- `deleteOrder` — remove an order
-- `setFee` — change pool fee (in 1/10000 units)
-- `clearAndSetBaseDecimals` — reset the book and change the base token's decimal places
+- `deleteBuyAt` / `deleteSellAt` — remove an order by index
+- `getBuyAt` / `getSellAt` — read an order by index
+- `validateLimit` / `validateBaseAmount` / `validateQuoteAmount` — pre-validate input
+- `getConfig` — read `baseDecimals` and `feeE4`
+- `match` — run the Fair Batch Matching and return the result
 
 Full reference (input keys, output shape, worked example) lives in
-[demo/README.md](demo/README.md#api).
+[demo/README.md](demo/README.md#api) and in the
+[npm package README](pkg/README.md).
 
 ## Why does the world need this?
 
