@@ -1,6 +1,7 @@
 #pragma once
 #include "general/serializer_fwd.hxx"
 #include "view_fwd.hpp"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <span>
@@ -29,7 +30,7 @@ struct View {
     auto operator<=>(const View& v) const
     {
         assert(!is_null() && !v.is_null());
-        return std::lexicographical_compare_three_way(begin(),end(), v.begin(),v.end());
+        return std::lexicographical_compare_three_way(begin(), end(), v.begin(), v.end());
     }
     bool operator==(const View& v) const
     {

@@ -65,27 +65,6 @@ struct PoolLiquidity_uint64 : public BaseQuote_uint64 {
         quote.add_assert(quoteAdd);
         return baseDelta;
     }
-    [[nodiscard]] BaseQuote_uint64 apply_match(const FillResult_uint64& m, uint64_t feeE4 = 10)
-    {
-        defi::BaseQuote_uint64 returned { m.filled };
-        if (m.toPool) {
-            auto pa { m.toPool->amount() };
-            if (m.toPool->is_quote()) {
-                returned.quote.subtract_assert(pa);
-                auto fromPool { buy(pa, feeE4) };
-                if (!fromPool.is_zero()) {
-                    returned.base.add_assert(fromPool);
-                }
-            } else {
-                returned.base.subtract_assert(pa);
-                auto fromPool { sell(pa, feeE4) };
-                if (!fromPool.is_zero()) {
-                    returned.quote.add_assert(fromPool);
-                }
-            }
-        }
-        return returned;
-    }
     constexpr static PoolLiquidity_uint64 zero() { return { 0, 0 }; }
 
 private:

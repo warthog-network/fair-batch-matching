@@ -1,8 +1,8 @@
 #pragma once
 #include "general/reader_declaration.hpp"
 #include "general/serializer_fwd.hxx"
-#include "nlohmann/json_fwd.hpp"
 #include <cstdint>
+#include <string>
 
 class Writer;
 
@@ -34,7 +34,6 @@ public:
 
     bool operator==(const IsUint32&) const = default;
     auto operator<=>(const IsUint32&) const = default;
-    operator nlohmann::json() const;
 
     constexpr uint32_t value() const
     {
@@ -91,7 +90,6 @@ public:
         : IsValue(val) { };
 
     std::string to_string() const;
-    operator nlohmann::json() const;
     constexpr uint64_t value() const
     {
         return val;

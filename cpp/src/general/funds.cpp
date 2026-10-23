@@ -2,10 +2,8 @@
 #include "general/errors.hpp"
 #include "general/params.hpp"
 #include "general/reader.hpp"
-#include "nlohmann/json.hpp"
 #include "general/try_parse.hpp"
 #include <cassert>
-#include <charconv>
 #include <cstring>
 #include <limits>
 
@@ -143,13 +141,6 @@ std::optional<Funds_uint64> Funds_uint64::parse(ParsedFunds fd, TokenDecimals di
     return Funds_uint64::from_value(v);
 }
 
-nlohmann::json Supply::to_json() const
-{
-    return {
-        { "str", to_string() },
-        { "u64", this->funds.value() }
-    };
-}
 
 Result<Wart> Wart::try_parse(std::string_view s)
 {

@@ -241,9 +241,6 @@ inline std::optional<NonzeroFunds_uint64> Funds_uint64::nonzero() const
     return *this;
 }
 
-struct Supply : public FundsDecimal {
-    nlohmann::json to_json() const;
-};
 
 class Wart : public FundsBase<Wart> {
 public:
