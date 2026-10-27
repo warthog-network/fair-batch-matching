@@ -29,7 +29,7 @@ The demo itself is built this way. Install the package and import it:
     import FbmEngine from "warthog-fbm";
     await FbmEngine.init();
     // Pool reserves default to (0, 0) until you call setPool.
-    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 50 });
     engine.setPool({ base: "100", quote: "200" });
     const m = engine.match();
     console.log(m.matched.price);
@@ -55,7 +55,7 @@ drop them next to your html:
 <script type="module">
     import init from "./fbm.js";
     const Module = await init();
-    const engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 5 });
+    const engine = new Module.FbmEngine({ baseDecimals: 8, feeE4: 50 });
     engine.setPool({ base: "100", quote: "200" });
     const m = engine.match();
     console.log(m.matched.price);
@@ -100,10 +100,12 @@ fee, and baseDecimals. Multiple instances share the same wasm module.
 |---|---|---|
 | `setPool` | `{ base?: string, quote?: string }` (both optional) | updates pool reserves. **Missing keys preserve current value**. **Atomic**: if any provided field is invalid, the whole call is rejected and neither reserve changes. |
 | `setFeeE4` | `number` (0–9999, basis points) | updates `feeE4` only on range check; failure leaves prior value |
-| `addBuy` | `Order` (`{ limit, amount }`, amount in WART) | inserts buy order |
-| `addSell` | `Order` (`{ limit, amount }`, amount in base token) | inserts sell order |
+| `addBuy` | `Order` (`{ limit, amount, caption? }`, amount in WART) | inserts buy order |
+| `addSell` | `Order` (`{ limit, amount, caption? }`, amount in base token) | inserts sell order |
 | `deleteBuyAt` | `number` (index) | returns the deleted `Order`, or `null` if not found |
 | `deleteSellAt` | `number` (index) | returns the deleted `Order`, or `null` if not found |
+| `deleteBuysAtPrice` | `number` (`limitBits`) | removes every buy order at that price level. Returns `{ ok: true, deleted: n }` or `{ error }` |
+| `deleteSellsAtPrice` | `number` (`limitBits`) | removes every sell order at that price level. Returns `{ ok: true, deleted: n }` or `{ error }` |
 | `getBuyAt` | `number` (index) | returns the `Order`, or `null` if not found. Does not mutate. |
 | `getSellAt` | `number` (index) | returns the `Order`, or `null` if not found. Does not mutate. |
 | `validateLimit` | `string` | parses limit only, **no state change**; use for live field validation |
@@ -114,7 +116,7 @@ fee, and baseDecimals. Multiple instances share the same wasm module.
 
 | Method | Return |
 |---|---|
-| `match()` | full `MatchResult` object — never null. `match().buys` / `match().sells` carry `{ amount, filled, limit }` per row (same shape as the add input plus the matched fill). |
+| `match()` | full `MatchResult` object, never null. `match().buys` / `match().sells` hold one entry per price level: `{ amount, filled, proceeds, limit, limitBits, orders }`, where `orders` holds that level's individual orders as `{ amount, filled, proceeds, caption }`. The price is not repeated per order, the level carries it. `match().pool` carries `{ before, after, swap, dust }`. Does not mutate any state. |
 
 ### Getters
 
@@ -141,10 +143,47 @@ Two important invariants in the demo:
    and renders the result. If invalid, `lastMatch` is set to `null`.
 2. **The order book tables render from `engine.match()` output, not from
    a parallel JS-side order list.** `state.lastMatch.buys` and
-   `state.lastMatch.sells` carry the engine's sorted order (buys DESC,
-   sells ASC) with `{ amount, filled, limit }` per row. Delete buttons
+   `state.lastMatch.sells` carry the engine's book as price levels (both
+   DESC by limit), each level holding its individual orders. Delete buttons
    index directly into the engine's book — there's no parallel state to
    keep in sync.
+3. **The pool table renders from `state.lastMatch.pool`.** It shows the
+   reserves before the match, the swap with the reserves, the rounding
+   dust credited back to them, and the reserves after.
+
+### The order book view
+
+The book is reported as price levels, the units the Fair Batch Matching
+actually matches on: the engine aggregates the orders of a level before the
+matching runs, and distributes the result back to the individual orders
+afterwards.
+
+The tables show a level row per price level, with the totals over its
+orders. The "Show individual orders" checkbox adds the level's individual
+orders as indented rows below it, each with its own ×.
+
+- The × on a **level row** removes every order at that price
+  (`deleteBuysAtPrice` / `deleteSellsAtPrice`, using the level's
+  `limitBits`).
+- The × on an **order row** removes that single order
+  (`deleteBuyAt` / `deleteSellAt`). The index it takes is the flat index
+  into the engine's book: the orders of the preceding levels plus the
+  order's position within its level.
+
+The price is not repeated per order in the output, the level carries it,
+so the demo prints the level's limit on each of its order rows.
+
+The toggle only changes the view, it never changes the matching.
+
+### Captions
+
+An order can carry a caption, a free-form label. It is set when the order
+is added, it never influences the matching, and it is **not unique**:
+several orders may carry the same one.
+
+A caption belongs to an order, so it is only shown on the order rows. The
+level rows leave that column empty, and the column is hidden when the
+individual orders are not shown.
 
 Live field validation: as the user types in `buyLimit` /
 `buyAmount` / `sellLimit` / `sellAmount`, the demo calls

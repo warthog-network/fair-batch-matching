@@ -13,6 +13,15 @@
             th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: right; }
             th:first-child, td:first-child { text-align: left; }
             input[type="text"], input[type="number"] { padding: 4px; min-width: 6em; }
+            .hint { color: #666; font-size: 0.85em; margin: 0.2em 0 0.8em 0; }
+            tr.level-row { font-weight: bold; }
+            tr.order-row { color: #444; font-size: 0.9em; }
+            tr.order-row td:first-child { padding-left: 2em; }
+            tr.order-row button { font-weight: normal; }
+            /* A caption belongs to an order, so the column only shows when
+               the individual orders are shown. */
+            .caption-only { display: none; }
+            table.show-orders .caption-only { display: table-cell; }
             section { margin-bottom: 1.5em; }
             h2 { margin-bottom: 0.5em; }
             #matchOutput { background: #f4f4f4; padding: 0.5em; font-family: monospace; font-size: 0.85em; max-height: 20em; overflow: auto; }
@@ -41,6 +50,8 @@
             <p class="error-note" id="buyLimitError"></p>
             <label>Amount (WART): <input id="buyAmount" type="text"></label>
             <p class="error-note" id="buyAmountError"></p>
+            <label>Caption (optional): <input id="buyCaption" type="text" maxlength="256"></label>
+            <p class="error-note" id="buyCaptionError"></p>
             <button id="addBuyButton" disabled>Add buy</button>
             <p class="error-note" id="buyError"></p>
         </section>
@@ -51,21 +62,33 @@
             <p class="error-note" id="sellLimitError"></p>
             <label>Amount (TOKEN): <input id="sellAmount" type="text"></label>
             <p class="error-note" id="sellAmountError"></p>
+            <label>Caption (optional): <input id="sellCaption" type="text" maxlength="256"></label>
+            <p class="error-note" id="sellCaptionError"></p>
             <button id="addSellButton" disabled>Add sell</button>
             <p class="error-note" id="sellError"></p>
         </section>
 
         <section>
             <h2>Order Book</h2>
+            <label><input id="showOrders" type="checkbox"> Show individual orders</label>
+            <p class="hint" id="showOrdersHint"></p>
             <h3>Sells</h3>
-            <table>
-                <thead><tr><th>×</th><th>AMOUNT</th><th>FILLED</th><th>LIMIT</th></tr></thead>
+            <table id="tableSell">
+                <thead><tr><th>×</th><th class="caption-only">CAPTION</th><th>AMOUNT</th><th>FILLED</th><th>PROCEEDS</th><th>LIMIT</th></tr></thead>
                 <tbody id="tbodySell"></tbody>
             </table>
             <h3>Buys</h3>
-            <table>
-                <thead><tr><th>×</th><th>AMOUNT</th><th>FILLED</th><th>LIMIT</th></tr></thead>
+            <table id="tableBuy">
+                <thead><tr><th>×</th><th class="caption-only">CAPTION</th><th>AMOUNT</th><th>FILLED</th><th>PROCEEDS</th><th>LIMIT</th></tr></thead>
                 <tbody id="tbodyBuy"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Pool</h2>
+            <table>
+                <thead><tr><th></th><th>BASE</th><th>QUOTE</th></tr></thead>
+                <tbody id="tbodyPool"></tbody>
             </table>
         </section>
 
@@ -93,7 +116,7 @@
             let engine = null;
             try {
                 await FbmEngine.init();
-                engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+                engine = new FbmEngine({ baseDecimals: 8, feeE4: 50 });
             } catch (err) {
                 document.body.innerHTML = `<pre>Failed to load FBM engine: ${err.message}</pre>`;
                 throw err;
@@ -109,8 +132,13 @@
                 feeE4:           { valid: true,  error: "" },
                 buyLimit:        { valid: false, error: "" },
                 buyAmount:       { valid: false, error: "" },
+                buyCaption:      { valid: true,  error: "" },
                 sellLimit:       { valid: false, error: "" },
                 sellAmount:      { valid: false, error: "" },
+                sellCaption:     { valid: true,  error: "" },
+                // Show the individual orders of every price level, not just
+                // the levels themselves.
+                showOrders: false,
                 lastMatch: null,
             };
 
@@ -135,6 +163,15 @@
             const sellError       = $("sellError");
             const tbodySell       = $("tbodySell");
             const tbodyBuy        = $("tbodyBuy");
+            const tbodyPool       = $("tbodyPool");
+            const tableSell       = $("tableSell");
+            const tableBuy        = $("tableBuy");
+            const showOrdersEl    = $("showOrders");
+            const showOrdersHint  = $("showOrdersHint");
+            const buyCaptionEl    = $("buyCaption");
+            const buyCaptionError = $("buyCaptionError");
+            const sellCaptionEl   = $("sellCaption");
+            const sellCaptionError = $("sellCaptionError");
             const matchReadiness  = $("matchReadiness");
             const matchOutput     = $("matchOutput");
             const addBuyButton    = $("addBuyButton");
@@ -154,28 +191,92 @@
                 // reflects what the engine actually has, including FILLED
                 // values from the latest match.
                 if (!state.lastMatch) return;
-                state.lastMatch.buys.forEach((row, i) => {
+
+                // The book comes as price levels, each holding its
+                // individual orders. A level row shows the totals, and the
+                // order rows below it show the individual orders.
+                //
+                // A caption belongs to an order, so the caption column is
+                // only shown when the individual orders are.
+                tableBuy.classList.toggle("show-orders", state.showOrders);
+                tableSell.classList.toggle("show-orders", state.showOrders);
+
+                const renderSide = (tbody, levels) => {
+                    // The flat index of an order in the engine's book: the
+                    // orders of the preceding levels plus its position
+                    // within its level. That is the index deleteBuyAt and
+                    // deleteSellAt take.
+                    let flatIndex = 0;
+                    levels.forEach((level, levelIndex) => {
+                        const tr = document.createElement("tr");
+                        tr.className = "level-row";
+                        const btn = document.createElement("button");
+                        btn.textContent = "×";
+                        btn.dataset.levelIndex = String(levelIndex);
+                        tr.insertCell().appendChild(btn);
+                        // A caption belongs to an order, so a level row has
+                        // no caption of its own.
+                        const captionCell = tr.insertCell();
+                        captionCell.className = "caption-only";
+                        tr.insertCell().textContent = level.amount;
+                        tr.insertCell().textContent = level.filled;
+                        tr.insertCell().textContent = level.proceeds;
+                        tr.insertCell().textContent = String(level.limit);
+                        tbody.appendChild(tr);
+
+                        if (!state.showOrders) {
+                            flatIndex += level.orders.length;
+                            return;
+                        }
+                        level.orders.forEach((order) => {
+                            const otr = document.createElement("tr");
+                            otr.className = "order-row";
+                            const obtn = document.createElement("button");
+                            obtn.textContent = "×";
+                            obtn.dataset.orderIndex = String(flatIndex);
+                            otr.insertCell().appendChild(obtn);
+                            const oc = otr.insertCell();
+                            oc.className = "caption-only";
+                            oc.textContent = order.caption;
+                            otr.insertCell().textContent = order.amount;
+                            otr.insertCell().textContent = order.filled;
+                            otr.insertCell().textContent = order.proceeds;
+                            // The price is not repeated per order, the level
+                            // carries it.
+                            otr.insertCell().textContent = String(level.limit);
+                            tbody.appendChild(otr);
+                            flatIndex += 1;
+                        });
+                    });
+                };
+
+                renderSide(tbodyBuy, state.lastMatch.buys);
+                renderSide(tbodySell, state.lastMatch.sells);
+            }
+
+            function renderPool() {
+                tbodyPool.innerHTML = "";
+                if (!state.lastMatch) return;
+                const p = state.lastMatch.pool;
+                const row = (label, base, quote) => {
                     const tr = document.createElement("tr");
-                    const btn = document.createElement("button");
-                    btn.textContent = "×";
-                    btn.dataset.buyIndex = String(i);
-                    tr.insertCell().appendChild(btn);
-                    tr.insertCell().textContent = row.amount;
-                    tr.insertCell().textContent = row.filled;
-                    tr.insertCell().textContent = String(row.limit);
-                    tbodyBuy.appendChild(tr);
-                });
-                state.lastMatch.sells.forEach((row, i) => {
-                    const tr = document.createElement("tr");
-                    const btn = document.createElement("button");
-                    btn.textContent = "×";
-                    btn.dataset.sellIndex = String(i);
-                    tr.insertCell().appendChild(btn);
-                    tr.insertCell().textContent = row.amount;
-                    tr.insertCell().textContent = row.filled;
-                    tr.insertCell().textContent = String(row.limit);
-                    tbodySell.appendChild(tr);
-                });
+                    tr.insertCell().textContent = label;
+                    tr.insertCell().textContent = base;
+                    tr.insertCell().textContent = quote;
+                    tbodyPool.appendChild(tr);
+                };
+                row("Before", p.before.base, p.before.quote);
+                if (p.swap) {
+                    // The real part of the pool flow: what the match pushed
+                    // into the reserves and what it took out of them.
+                    row(p.swap.isQuote ? "Swap (quote in)" : "Swap (base in)",
+                        p.swap.isQuote ? `-${p.swap.out}` : p.swap.in,
+                        p.swap.isQuote ? p.swap.in : `-${p.swap.out}`);
+                }
+                // The rounding dust: what the floor division left over and
+                // the node credits back to the reserves.
+                row("Dust", p.dust.base, p.dust.quote);
+                row("After", p.after.base, p.after.quote);
             }
 
             function renderMatchReadiness() {
@@ -202,6 +303,7 @@
                 renderMatchReadiness();
                 renderMatch();
                 renderOrders();
+                renderPool();
             }
 
             // ─── Button gating ────────────────────────────────────────────────
@@ -215,6 +317,16 @@
             }
 
             // ─── Input handlers ───────────────────────────────────────────────
+            const showOrdersHintText = () => showOrdersHint.textContent = state.showOrders
+                ? "Each price level is followed by its individual orders. × on a level removes every order at that price, × on an order removes that one."
+                : "One row per price level, the units the FBM matches on. × removes every order at that level.";
+            showOrdersEl.addEventListener("change", () => {
+                state.showOrders = showOrdersEl.checked;
+                showOrdersHintText();
+                renderOrders();
+            });
+            showOrdersHintText();
+
             poolBaseEl.addEventListener("input", () => {
                 const res = engine.setPool({ base: poolBaseEl.value });
                 state.poolBase.valid = "ok" in res;
@@ -311,6 +423,7 @@
                 const res = engine.addBuy({
                     limit: buyLimitEl.value,
                     amount: buyAmountEl.value,
+                    ...(buyCaptionEl.value ? { caption: buyCaptionEl.value } : {}),
                 });
                 if ("ok" in res) {
                     buyError.textContent = "";
@@ -323,6 +436,7 @@
                 const res = engine.addSell({
                     limit: sellLimitEl.value,
                     amount: sellAmountEl.value,
+                    ...(sellCaptionEl.value ? { caption: sellCaptionEl.value } : {}),
                 });
                 if ("ok" in res) {
                     sellError.textContent = "";
@@ -332,26 +446,42 @@
                 }
             });
 
-            // Delete order — buy orders are on the quote side, sell orders on
-            // the base side. The index is into the engine's book (DESC for
-            // buys, ASC for sells), so we use the dataset value directly.
+            // Delete: buy orders are on the quote side, sell orders on the
+            // base side. A level row removes every order at that price, an
+            // order row removes that single order.
             tbodyBuy.addEventListener("click", (e) => {
-                const btn = e.target.closest("button[data-buy-index]");
-                if (!btn) return;
-                const idx = Number(btn.dataset.buyIndex);
-                const res = engine.deleteBuyAt(idx);
-                if (res) {
+                const levelBtn = e.target.closest("button[data-level-index]");
+                if (levelBtn) {
+                    // A level row: remove every order at that price.
+                    const level = state.lastMatch.buys[Number(levelBtn.dataset.levelIndex)];
+                    if (!level) return;
+                    engine.deleteBuysAtPrice(level.limitBits);
                     tryMatch();
+                    return;
                 }
+                const orderBtn = e.target.closest("button[data-order-index]");
+                if (!orderBtn) return;
+                // An order row: remove that single order. The index is the
+                // flat index into the engine's book.
+                engine.deleteBuyAt(Number(orderBtn.dataset.orderIndex));
+                tryMatch();
             });
             tbodySell.addEventListener("click", (e) => {
-                const btn = e.target.closest("button[data-sell-index]");
-                if (!btn) return;
-                const idx = Number(btn.dataset.sellIndex);
-                const res = engine.deleteSellAt(idx);
-                if (res) {
+                const levelBtn = e.target.closest("button[data-level-index]");
+                if (levelBtn) {
+                    // A level row: remove every order at that price.
+                    const level = state.lastMatch.sells[Number(levelBtn.dataset.levelIndex)];
+                    if (!level) return;
+                    engine.deleteSellsAtPrice(level.limitBits);
                     tryMatch();
+                    return;
                 }
+                const orderBtn = e.target.closest("button[data-order-index]");
+                if (!orderBtn) return;
+                // An order row: remove that single order. The index is the
+                // flat index into the engine's book.
+                engine.deleteSellAt(Number(orderBtn.dataset.orderIndex));
+                tryMatch();
             });
 
             // ─── Initial render ───────────────────────────────────────────────

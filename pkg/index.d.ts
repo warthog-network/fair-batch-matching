@@ -9,11 +9,23 @@ export interface FbmConfig {
      * different decimal count, construct a new `FbmEngine`.
      */
     baseDecimals?: number;
-    /** Initial pool trading fee in 1/10000 units, 0..9999. Default `5`. */
+    /**
+     * Initial pool trading fee in 1/10000 units, 0..9999. Default `50`
+     * (0.50%), the same fee the Warthog node applies to pool swaps.
+     */
     feeE4?: number;
 }
 
 /* ---------- Order type ---------- */
+
+/**
+ * A free-form label for an order.
+ *
+ * The caption is metadata only: it never influences the matching in any
+ * way, and it is **not unique**, several orders may carry the same one.
+ * It is set when the order is added and stays with it for its whole life.
+ */
+export type Caption = string;
 
 /**
  * A single order in the book. Same shape for buys and sells, same shape
@@ -39,6 +51,8 @@ export interface Order {
      * trip in between.
      */
     limitBits: number;
+    /** The order's caption, an empty string when it has none. */
+    caption: Caption;
 }
 
 /**
@@ -52,6 +66,12 @@ export interface OrderInput {
     amount: string;
     limit?: string;
     limitBits?: number;
+    /**
+     * A free-form label for the order. It never influences the matching
+     * and it is not unique, several orders may share one. Missing = no
+     * caption. At most 256 bytes.
+     */
+    caption?: Caption;
 }
 
 /* ---------- Input interfaces ---------- */
@@ -75,9 +95,64 @@ export interface ErrorResponse {
 
 export type MutatorResult = OkResponse | ErrorResponse;
 
+/**
+ * The result of a mutator that removes orders. It reports how many orders
+ * were actually removed.
+ */
+export type DeleteResult = (OkResponse & { deleted: number }) | ErrorResponse;
+
 /* ---------- Match result ---------- */
 
-export type MatchedOrder = Order & { filled: string };
+/**
+ * A single order in the book, together with what a match did to it.
+ *
+ * `filled` is the amount filled on the **input** side: base for a sell
+ * order, quote (WART) for a buy order.
+ *
+ * `proceeds` is the amount received on the **output** side: quote (WART)
+ * for a sell order, base for a buy order. It is the floor-rounded
+ * proportional share of the matched amount, so the sum of all proceeds is
+ * slightly less than the matched total. The remainder is the rounding
+ * dust, reported as `pool.dust`.
+ *
+ * The price is not repeated here, the price level carries it.
+ */
+export interface MatchedOrder {
+    /** The order's own size. */
+    amount: string;
+    filled: string;
+    proceeds: string;
+    /** The order's caption, an empty string when it has none. */
+    caption: Caption;
+}
+
+/**
+ * One price level of the book: the orders sharing a limit price, with
+ * their amounts summed.
+ *
+ * The price levels are the units the Fair Batch Matching actually matches
+ * on: the book is aggregated by price level before the matching runs, and
+ * the result is distributed back to the individual orders afterwards.
+ *
+ * `filled` and `proceeds` are the sums over the orders at the level. The
+ * proceeds of a level are what those orders actually received, which is
+ * deliberately not the same as the floor-rounded share of the level total:
+ * the difference is part of the rounding dust.
+ */
+export interface MatchedLevel {
+    /** The level's limit price (quote per base), the same rendering as an order's. */
+    limit: string;
+    /** The level's limit as raw price-grid bits: `mantissa | exponent << 16`. */
+    limitBits: number;
+    /** Sum of the amounts of the orders at this level. */
+    amount: string;
+    /** Sum of the amounts filled at this level. */
+    filled: string;
+    /** Sum of the amounts received at this level. */
+    proceeds: string;
+    /** The individual orders at this level, oldest first. */
+    orders: MatchedOrder[];
+}
 
 export interface PoolSnapshot {
     base: string;
@@ -85,34 +160,98 @@ export interface PoolSnapshot {
     price: number;
 }
 
-export interface ToPool {
+/**
+ * The real part of the pool flow: the amounts a match exchanged with the
+ * pool reserves.
+ *
+ * The match pushes one currency into the reserves and takes the other out
+ * of them (the excess that found no counterparty in the order book).
+ * `isQuote` tells which way round it went: `true` means quote went in and
+ * base came out, `false` means base went in and quote came out.
+ */
+export interface PoolSwap {
     isQuote: boolean;
-    base: string;
-    quote: string;
+    /** Amount pushed into the pool reserves. */
+    in: string;
+    /** Amount taken out of the pool reserves. */
+    out: string;
+    /** Price of the swap, quote per base. */
     price: number;
 }
 
+/**
+ * The rounding dust a match credited back to the pool reserves.
+ *
+ * When a match is distributed back to the individual orders, the output
+ * side is split proportionally with a *floor* division, so a few units are
+ * lost. The node credits that remainder to the pool reserves; the engine
+ * reports it here and includes it in `pool.after`.
+ *
+ * The dust exists in both currencies independently and it also arises when
+ * the pool is not traded with at all.
+ */
+export interface PoolDust {
+    /** Base dust credited to the pool reserves. */
+    base: string;
+    /** Quote dust credited to the pool reserves. */
+    quote: string;
+}
+
+/** Everything a match did to the pool reserves. */
+export interface MatchPool {
+    /** Reserves before the match. */
+    before: PoolSnapshot;
+    /** Reserves after the match: `before` + `swap` + `dust`. */
+    after: PoolSnapshot;
+    /** The real exchange with the reserves, `null` if the pool was not traded with. */
+    swap: PoolSwap | null;
+    /** The rounding dust credited back to the reserves. */
+    dust: PoolDust;
+}
+
 export interface Filled {
+    /** Base the sellers gave, gross (includes the part that went into the pool). */
     outBaseSeller: string;
+    /** Quote the sellers received, i.e. the sum of the sell orders' proceeds. */
     inQuoteSeller: string;
+    /** Price the sellers got, quote per base. */
     priceSeller: number;
+    /** Quote the buyers paid, gross (includes the part that went into the pool). */
     outQuoteBuyer: string;
+    /** Base the buyers received, i.e. the sum of the buy orders' proceeds. */
     inBaseBuyer: string;
+    /** Price the buyers paid, base per quote. */
     priceBuyer: number;
 }
 
 export interface Matched {
+    /**
+     * Base that changed hands between the orders, counting what the pool
+     * contributed.
+     */
     base: string;
+    /**
+     * Quote that changed hands between the orders, counting what the pool
+     * contributed.
+     */
     quote: string;
     price: number | null;
 }
 
 export interface MatchResult {
-    buys: MatchedOrder[];
-    sells: MatchedOrder[];
-    poolBefore: PoolSnapshot;
-    poolAfter: PoolSnapshot;
-    toPool: ToPool | null;
+    /**
+     * The buy side, aggregated by price level and descending by limit.
+     * These are the units the matching actually ran on, and each level
+     * carries its individual orders.
+     */
+    buys: MatchedLevel[];
+    /**
+     * The sell side, aggregated by price level and descending by limit.
+     * These are the units the matching actually ran on, and each level
+     * carries its individual orders.
+     */
+    sells: MatchedLevel[];
+    pool: MatchPool;
     filled: Filled;
     matched: Matched;
 }
@@ -150,6 +289,21 @@ type RawFbmEngineInstance = InstanceType<MainModule["FbmEngine"]>;
  * `engine.match()` whenever you want a fresh `MatchResult`. The
  * engine itself never returns null from `match()`; a `(0, 0)` pool
  * is treated as a valid (if degenerate) input.
+ *
+ * **Node parity.** `match()` reproduces the Warthog node's matching
+ * pipeline: the book is aggregated by price level, the FBM runs on the
+ * levels, and the matched amounts are distributed back to the individual
+ * orders. The output side of that distribution is split proportionally
+ * with a floor division, so a few units are lost; the node credits that
+ * rounding dust back to the pool reserves and the engine reports it as
+ * `pool.dust` and includes it in `pool.after`.
+ *
+ * The result carries the book aggregated by price level: `buys` and
+ * `sells` hold one entry per price level, and each level carries its
+ * individual orders in `orders`.
+ *
+ * `match()` does not mutate any state: the pool reserves and the book
+ * are unchanged after the call.
  */
 export type FbmEngine = Omit<
     RawFbmEngineInstance,
@@ -159,6 +313,8 @@ export type FbmEngine = Omit<
     | "addSell"
     | "deleteBuyAt"
     | "deleteSellAt"
+    | "deleteBuysAtPrice"
+    | "deleteSellsAtPrice"
     | "validateLimit"
     | "validateBaseAmount"
     | "validateQuoteAmount"
@@ -193,6 +349,24 @@ export type FbmEngine = Omit<
      * the add input) or `null` if no order is found at that index.
      */
     deleteSellAt(index: number): Order | null;
+    /**
+     * Removes every buy order at the given price level. `limitBits` is the
+     * exact price-grid value of the level, as reported by `limitBits` on
+     * an order or on a level row of `match().buys`.
+     *
+     * Returns how many orders were removed, or `{ error }` if the limit
+     * is not a valid price-grid value.
+     */
+    deleteBuysAtPrice(limitBits: number): DeleteResult;
+    /**
+     * Removes every sell order at the given price level. `limitBits` is
+     * the exact price-grid value of the level, as reported by `limitBits`
+     * on an order or on a level row of `match().sells`.
+     *
+     * Returns how many orders were removed, or `{ error }` if the limit
+     * is not a valid price-grid value.
+     */
+    deleteSellsAtPrice(limitBits: number): DeleteResult;
     /**
      * Pure-parse validators. Return `{ ok }` if the input is valid, or
      * `{ error }` describing why not. **No state is mutated** — these

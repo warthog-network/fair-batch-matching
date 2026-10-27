@@ -56,7 +56,7 @@ import the loader:
 <script type="module">
     import FbmEngine from "./fbm.js";
     await FbmEngine.init();
-    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+    const engine = new FbmEngine({ baseDecimals: 8, feeE4: 50 });
     engine.setPool({ base: "100", quote: "200" });
     engine.addBuy({ limit: "1.5", amount: "5" });
 </script>
@@ -74,8 +74,11 @@ market; the module is shared, the state is not.
 import FbmEngine from "warthog-fbm";
 
 await FbmEngine.init();
-const engine = new FbmEngine({ baseDecimals: 8, feeE4: 5 });
+const engine = new FbmEngine({ baseDecimals: 8, feeE4: 50 });
 ```
+
+The default `feeE4` is `50` (0.50%), the same pool fee the Warthog node
+applies to pool swaps.
 
 Its methods:
 
@@ -83,6 +86,7 @@ Its methods:
 - `setFeeE4` — change the pool fee (in 1/10000 units)
 - `addBuy` / `addSell` — submit limit orders
 - `deleteBuyAt` / `deleteSellAt` — remove an order by index
+- `deleteBuysAtPrice` / `deleteSellsAtPrice`: remove every order at a price level
 - `getBuyAt` / `getSellAt` — read an order by index
 - `validateLimit` / `validateBaseAmount` / `validateQuoteAmount` — pre-validate input
 - `getConfig` — read `baseDecimals` and `feeE4`
@@ -91,6 +95,51 @@ Its methods:
 Full reference (input keys, output shape, worked example) lives in
 [demo/README.md](demo/README.md#api) and in the
 [npm package README](pkg/README.md).
+
+## Node parity
+
+`match()` reproduces the Warthog node's matching pipeline
+(`MatchProcessor::match` in the node's `block_applier.cpp`):
+
+1. The order book is aggregated by price level. All orders sharing a limit
+   price are merged into one effective entry whose amount is their sum, and
+   the FBM runs on those levels only.
+2. The FBM result is split back to the individual orders. The amount filled
+   on the input side is handed out greedily (oldest order first within a
+   price level), while the amount received on the output side is
+   distributed proportionally with a *floor* division. The latest added
+   order at a price level is therefore filled last: it has the least
+   priority there. The node does the same, it fills the orders at a level
+   in id ascending order.
+3. The floor division leaves a remainder, the **rounding dust**, which the
+   node credits back to the pool reserves. The dust exists in both
+   currencies independently, and it also arises when the pool is not traded
+   with at all.
+
+The node loads the price levels lazily: it loads a partial aggregated book,
+knowing that the levels it skips cannot influence the result. The engine
+aggregates the whole book up front instead, which gives the same outcome.
+
+The match result reports the book as price levels, the units the matching
+actually runs on: `buys` and `sells` hold one entry per level, with the
+amounts summed over the level's orders, and the level's individual orders
+in `orders`. The price is stated once, at the level, so the per-order
+entries carry only their amounts.
+
+The pool flow is reported split into its two parts:
+
+- `pool.swap`: the real exchange with the reserves, what the match pushed
+  in and what it took out. `null` when the pool was not traded with.
+- `pool.dust`: the rounding dust credited back to the reserves.
+
+`pool.after` is `pool.before` plus the swap plus the dust.
+
+An order can carry a **caption**, a free-form label. It is metadata only:
+it never influences the matching, and it is not unique, several orders may
+carry the same one.
+
+`match()` does not mutate any state: the pool reserves and the book are
+unchanged after the call.
 
 ## Why does the world need this?
 
