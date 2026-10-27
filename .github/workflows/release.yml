@@ -65,25 +65,36 @@ jobs:
           meson setup cpp/build-wasm cpp --cross-file=cpp/crosscompile/emscripten.txt --prefix=/
           meson compile -C cpp/build-wasm
 
-      - name: Verify Embind symbols present
-        run: |
-          # FbmEngine class + 14 methods
-          # (6 mutators, 3 validators, 4 getters, 1 match).
-          for fn in FbmEngine \
-                    setPool setFeeE4 \
-                    addBuy addSell deleteBuyAt deleteSellAt \
-                    validateLimit validateBaseAmount validateQuoteAmount \
-                    getConfig getPool getBuyAt getSellAt \
-                    match; do
-            strings cpp/build-wasm/fbm.wasm | grep -qx "$fn" \
-              || { echo "missing Embind binding: $fn"; exit 1; }
-          done
-
       - name: Verify emcc --emit-tsd wrote index.raw.d.ts
         run: |
           [ -f pkg/index.raw.d.ts ] || { echo "missing pkg/index.raw.d.ts"; exit 1; }
           grep -q 'export default function MainModuleFactory' pkg/index.raw.d.ts \
             || { echo "pkg/index.raw.d.ts does not look like an emcc tsd output"; exit 1; }
+
+      - name: Verify Embind symbols present
+        run: |
+          # The tsd output is generated from the Embind registrations, so it
+          # is the authoritative record of the bound surface. Probing the
+          # wasm binary with `strings` is not: that reads the linker's
+          # string pool, where internal C++ symbols and source paths sit
+          # next to the method names. A method name showing up there says
+          # nothing about whether the binding exists, and a bound method
+          # can be missing from it when its name is a suffix of an internal
+          # symbol.
+          #
+          # FbmEngine class + 16 methods
+          # (8 mutators, 3 validators, 4 getters, 1 match).
+          for fn in setPool setFeeE4 \
+                    addBuy addSell \
+                    deleteBuyAt deleteSellAt deleteBuysAtPrice deleteSellsAtPrice \
+                    validateLimit validateBaseAmount validateQuoteAmount \
+                    getConfig getPool getBuyAt getSellAt \
+                    match; do
+            grep -qE "^  ${fn}\\(" pkg/index.raw.d.ts \
+              || { echo "missing Embind binding: $fn"; exit 1; }
+          done
+          grep -q "^export interface FbmEngine " pkg/index.raw.d.ts \
+            || { echo "missing Embind class: FbmEngine"; exit 1; }
 
       - name: Stage demo bundle into demo/out/
         run: just stage
