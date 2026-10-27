@@ -52,8 +52,8 @@ build-pkg:
 clean-pkg:
     cd pkg && rm -rf dist node_modules
 
-# Bump version in cpp/meson.build AND pkg/package.json in lockstep, commit,
-# and tag locally. Push yourself.
+# Bump version in cpp/meson.build, pkg/package.json AND
+# pkg/package-lock.json in lockstep, commit, and tag locally. Push yourself.
 bump part="patch":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -69,7 +69,18 @@ bump part="patch":
     new="${major}.${minor}.${patch}"
     sed -i -E "s/(version\s*:\s*')$cur'/\1${new}'/" cpp/meson.build
     sed -i -E "s/(\"version\"\s*:\s*\")[^\"]+(\")/\1${new}\2/" pkg/package.json
-    git add cpp/meson.build pkg/package.json
+    # The lockfile carries the version twice: at the top level and in the
+    # root package entry. Patch those two only, a blanket sed would hit the
+    # dependencies' versions too.
+    node -e '
+      const fs = require("fs");
+      const p = "pkg/package-lock.json";
+      const j = JSON.parse(fs.readFileSync(p, "utf8"));
+      j.version = process.argv[1];
+      if (j.packages && j.packages[""]) j.packages[""].version = process.argv[1];
+      fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+    ' "$new"
+    git add cpp/meson.build pkg/package.json pkg/package-lock.json
     git commit -m "bump version to ${new}"
     git tag -a "v${new}" -m "Release v${new}"
     echo "Committed and tagged v${new}. Push with:"
